@@ -464,6 +464,117 @@ fitbit_hr_df <- read_bq_export_from_workspace_bucket(
 
 message(str_glue("Loaded {nrow(fitbit_hr_df)} Fitbit heart rate records"))
 
+# -----------------------------------------------------------------------------
+# 1.6 Condition Occurrences (for obesity diagnosis)
+# -----------------------------------------------------------------------------
+message("Loading condition occurrences...")
+
+dataset_41386742_condition_sql <- paste("
+    SELECT
+        c_occurrence.person_id,
+        c_occurrence.condition_concept_id,
+        c_standard_concept.concept_name as standard_concept_name,
+        c_standard_concept.concept_code as standard_concept_code,
+        c_standard_concept.vocabulary_id as standard_vocabulary,
+        c_occurrence.condition_start_datetime,
+        c_occurrence.condition_end_datetime,
+        c_occurrence.condition_type_concept_id,
+        c_type.concept_name as condition_type_concept_name,
+        c_occurrence.stop_reason,
+        c_occurrence.visit_occurrence_id,
+        visit.concept_name as visit_occurrence_concept_name,
+        c_occurrence.condition_source_value,
+        c_occurrence.condition_source_concept_id,
+        c_source_concept.concept_name as source_concept_name,
+        c_source_concept.concept_code as source_concept_code,
+        c_source_concept.vocabulary_id as source_vocabulary,
+        c_occurrence.condition_status_source_value,
+        c_occurrence.condition_status_concept_id,
+        c_status.concept_name as condition_status_concept_name
+    FROM
+        ( SELECT
+            *
+        FROM
+            `condition_occurrence` c_occurrence
+        WHERE
+            (
+                condition_concept_id IN (SELECT
+                    DISTINCT c.concept_id
+                FROM
+                    `cb_criteria` c
+                JOIN
+                    (SELECT
+                        CAST(cr.id as string) AS id
+                    FROM
+                        `cb_criteria` cr
+                    WHERE
+                        concept_id IN (201254, 201820, 201826, 312648, 316866, 320128, 37018860, 4008576, 4028741, 4029276, 4079749, 4079750, 4087487, 4143463, 4171317, 4171972, 4185932, 4189665, 4193704, 4217557, 433736, 434005, 80180)
+                        AND full_text LIKE '%_rank1]%'      ) a
+                        ON (c.path LIKE CONCAT('%.', a.id, '.%')
+                        OR c.path LIKE CONCAT('%.', a.id)
+                        OR c.path LIKE CONCAT(a.id, '.%')
+                        OR c.path = a.id)
+                WHERE
+                    is_standard = 1
+                    AND is_selectable = 1)
+            )
+            AND (
+                c_occurrence.PERSON_ID IN (SELECT
+                    distinct person_id
+                FROM
+                    `cb_search_person` cb_search_person
+                WHERE
+                    cb_search_person.person_id IN (SELECT
+                        person_id
+                    FROM
+                        `cb_search_person` p
+                    WHERE
+                        has_fitbit = 1 ) )
+            )) c_occurrence
+    LEFT JOIN
+        `concept` c_standard_concept
+            ON c_occurrence.condition_concept_id = c_standard_concept.concept_id
+    LEFT JOIN
+        `concept` c_type
+            ON c_occurrence.condition_type_concept_id = c_type.concept_id
+    LEFT JOIN
+        `visit_occurrence` v
+            ON c_occurrence.visit_occurrence_id = v.visit_occurrence_id
+    LEFT JOIN
+        `concept` visit
+            ON v.visit_concept_id = visit.concept_id
+    LEFT JOIN
+        `concept` c_source_concept
+            ON c_occurrence.condition_source_concept_id = c_source_concept.concept_id
+    LEFT JOIN
+        `concept` c_status
+            ON c_occurrence.condition_status_concept_id = c_status.concept_id", sep="")
+
+condition_41386742_path <- file.path(
+  Sys.getenv("WORKSPACE_BUCKET"),
+  "bq_exports",
+  Sys.getenv("OWNER_EMAIL"),
+  strftime(lubridate::now(), "%Y%m%d"),
+  "condition_41386742",
+  "condition_41386742_*.csv")
+
+bq_table_save(
+  bq_dataset_query(Sys.getenv("WORKSPACE_CDR"), dataset_41386742_condition_sql, billing = Sys.getenv("GOOGLE_PROJECT")),
+  condition_41386742_path,
+  destination_format = "CSV")
+
+dataset_41386742_condition_df <- read_bq_export_from_workspace_bucket(
+  condition_41386742_path,
+  col_types = cols(standard_concept_name = col_character(), standard_concept_code = col_character(),
+                   standard_vocabulary = col_character(), condition_type_concept_name = col_character(),
+                   stop_reason = col_character(), visit_occurrence_concept_name = col_character(),
+                   condition_source_value = col_character(), source_concept_name = col_character(),
+                   source_concept_code = col_character(), source_vocabulary = col_character(),
+                   condition_status_source_value = col_character(), condition_status_concept_name = col_character())
+)
+
+message(str_glue("Loaded {nrow(dataset_41386742_condition_df)} condition records"))
+
 # =============================================================================
 # SECTION 2: DATA CLEANING AND TRANSFORMATION
 # =============================================================================
@@ -749,6 +860,7 @@ save(
   activity_with_glp1,
   weight_with_glp1,
   fitbit_hr_df,
+  dataset_41386742_condition_df,
   file = "glp1_processed_data.RData"
 )
 

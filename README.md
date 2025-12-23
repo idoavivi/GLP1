@@ -73,6 +73,13 @@ Creates publication-quality visualizations for the windowed analysis results.
 
 The windowed analysis provides a rigorous, time-based approach to assess activity changes:
 
+### Eligibility Criteria
+Patients must meet **both** criteria:
+1. **GLP-1 Therapy**: Initiated injectable semaglutide or tirzepatide
+2. **BMI Criteria** (at baseline, before or at GLP-1 initiation):
+   - BMI ≥ 30, **OR**
+   - BMI ≥ 27 with documented obesity diagnosis
+
 ### Baseline Selection Algorithm
 1. Tests four pre-GLP1 windows: -30 to 0 days, -60 to 0, -90 to 0, -180 to 0
 2. For each window, requires 3, 5, 7, or 10 minimum Fitbit days

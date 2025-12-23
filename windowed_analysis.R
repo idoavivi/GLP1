@@ -16,6 +16,87 @@ cat("GLP-1 WINDOWED ANALYSIS\n")
 cat("=============================================================================\n\n")
 
 # =============================================================================
+# ELIGIBILITY CRITERIA: BMI >= 30 OR BMI >= 27 WITH OBESITY DIAGNOSIS
+# =============================================================================
+
+cat("\n### ELIGIBILITY FILTERING ###\n\n")
+
+# Step 1: Identify patients with obesity diagnosis
+if (exists("dataset_41386742_condition_df")) {
+  condition_df <- dataset_41386742_condition_df
+} else {
+  # If condition data not loaded, set empty
+  cat("Warning: Condition data not found. Proceeding with BMI criteria only.\n")
+  condition_df <- tibble(person_id = integer(), standard_concept_name = character())
+}
+
+# Identify obesity diagnoses (ICD-10 E66.x, SNOMED obesity concepts)
+obesity_keywords <- c("obesity", "obese", "overweight")
+patients_with_obesity_dx <- condition_df %>%
+  filter(str_detect(tolower(standard_concept_name), paste(obesity_keywords, collapse = "|"))) %>%
+  distinct(person_id) %>%
+  mutate(has_obesity_dx = TRUE)
+
+cat(sprintf("Patients with obesity diagnosis: %d\n", nrow(patients_with_obesity_dx)))
+
+# Step 2: Calculate baseline BMI for each patient
+# Use most recent BMI before or at GLP-1 initiation
+baseline_bmi <- weight_with_glp1 %>%
+  filter(days_from_initiation <= 0) %>%
+  filter(!is.na(bmi)) %>%
+  group_by(person_id) %>%
+  slice_max(measurement_date, n = 1, with_ties = FALSE) %>%
+  ungroup() %>%
+  select(person_id, baseline_bmi = bmi, baseline_weight = weight_kg)
+
+cat(sprintf("Patients with baseline BMI: %d\n", nrow(baseline_bmi)))
+
+# Step 3: Apply eligibility criteria
+eligible_patients <- baseline_bmi %>%
+  left_join(patients_with_obesity_dx, by = "person_id") %>%
+  mutate(has_obesity_dx = replace_na(has_obesity_dx, FALSE)) %>%
+  mutate(
+    eligible = case_when(
+      baseline_bmi >= 30 ~ TRUE,
+      baseline_bmi >= 27 & has_obesity_dx ~ TRUE,
+      TRUE ~ FALSE
+    )
+  ) %>%
+  filter(eligible)
+
+cat(sprintf("\nEligibility Summary:\n"))
+cat(sprintf("  BMI >= 30: %d patients\n",
+            sum(eligible_patients$baseline_bmi >= 30)))
+cat(sprintf("  BMI 27-29.9 with obesity dx: %d patients\n",
+            sum(eligible_patients$baseline_bmi >= 27 &
+                eligible_patients$baseline_bmi < 30 &
+                eligible_patients$has_obesity_dx)))
+cat(sprintf("  TOTAL ELIGIBLE: %d patients\n", nrow(eligible_patients)))
+
+# Step 4: Filter all datasets to eligible patients only
+eligible_person_ids <- eligible_patients$person_id
+
+activity_with_glp1 <- activity_with_glp1 %>%
+  filter(person_id %in% eligible_person_ids)
+
+weight_with_glp1 <- weight_with_glp1 %>%
+  filter(person_id %in% eligible_person_ids)
+
+glp1_initiation <- glp1_initiation %>%
+  filter(person_id %in% eligible_person_ids)
+
+fitbit_activity_filtered <- fitbit_activity_filtered %>%
+  filter(person_id %in% eligible_person_ids)
+
+anthro_completed <- anthro_completed %>%
+  filter(person_id %in% eligible_person_ids)
+
+drug_glp1 <- drug_glp1 %>%
+  filter(person_id %in% eligible_person_ids)
+
+cat(sprintf("\nDatasets filtered to %d eligible patients\n", length(eligible_person_ids)))
+
+# =============================================================================
 # PART 1: PRE-GLP1 BASELINE WINDOW SELECTION
 # =============================================================================
 
@@ -561,6 +642,7 @@ cat("\n\n=== SAVING RESULTS ===\n\n")
 
 # Save all results
 windowed_analysis_results <- list(
+  eligible_patients = eligible_patients,
   baseline_windows_all = baseline_results,
   baseline_winners = baseline_winners,
   recommended_baseline = recommended_baseline,
