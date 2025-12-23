@@ -69,6 +69,15 @@ Sophisticated longitudinal analysis with specific time windows:
 ### 4. **windowed_visualizations.R** - Windowed Analysis Figures
 Creates publication-quality visualizations for the windowed analysis results.
 
+### 5. **statistical_comparison_table.R** - Publication Table with P-values
+Creates comprehensive statistical comparison table showing:
+- Baseline vs each follow-up timepoint (30, 60, 90, 120, 180, 360 days + nadir)
+- Paired t-tests for all comparisons
+- All metrics: weight, steps, sedentary/light/fairly/very active minutes, activity calories
+- P-values with significance stars (*** p<0.001, ** p<0.01, * p<0.05)
+- Mean ± SD for all measurements
+- Change scores and percent change
+
 ## Windowed Analysis Methodology
 
 The windowed analysis provides a rigorous, time-based approach to assess activity changes:
@@ -129,6 +138,11 @@ This approach ensures:
 14. **figure_sample_sizes.png**: Sample size at each timepoint
 15. **figure_percent_change.png**: Percent change for all metrics
 
+### Statistical Comparison Outputs
+16. **statistical_comparisons_table.csv**: Publication-ready table with p-values
+17. **statistical_comparisons_detailed.csv**: Detailed statistical results
+18. **key_findings_summary.csv**: Brief summary of key findings
+
 ## Data Structure
 
 ### Activity Data (activity_with_glp1)
@@ -173,7 +187,14 @@ source("windowed_analysis.R")
 # This creates: windowed_analysis_results.RData and CSV files
 ```
 
-#### Step 3: Create Visualizations
+#### Step 3: Statistical Comparison Table (RECOMMENDED)
+```r
+# Create publication table with p-values
+source("statistical_comparison_table.R")
+# This creates: statistical_comparisons_table.csv
+```
+
+#### Step 4: Create Visualizations
 ```r
 # Generate all figures
 source("windowed_visualizations.R")
