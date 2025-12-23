@@ -5,8 +5,14 @@
 
 library(tidyverse)
 library(ggplot2)
-library(patchwork)
 library(scales)
+
+# Optional packages - install if needed
+if (!require(patchwork, quietly = TRUE)) {
+  message("Installing patchwork package...")
+  install.packages("patchwork")
+  library(patchwork)
+}
 
 # Load windowed analysis results
 load("windowed_analysis_results.RData")

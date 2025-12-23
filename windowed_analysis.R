@@ -5,8 +5,14 @@
 
 library(tidyverse)
 library(lubridate)
-library(knitr)
-library(kableExtra)
+
+# Optional packages for table formatting (not required)
+suppressWarnings({
+  suppressMessages({
+    require(knitr, quietly = TRUE)
+    require(kableExtra, quietly = TRUE)
+  })
+})
 
 # Load processed data
 load("glp1_processed_data.RData")

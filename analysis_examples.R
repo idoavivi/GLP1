@@ -5,12 +5,28 @@
 # =============================================================================
 
 library(tidyverse)
-library(lme4)
-library(lmerTest)
 library(ggplot2)
-library(patchwork)
 library(broom)
 library(scales)
+
+# Optional packages - install if needed
+if (!require(patchwork, quietly = TRUE)) {
+  message("Installing patchwork package...")
+  install.packages("patchwork")
+  library(patchwork)
+}
+
+# Mixed effects modeling packages (optional)
+use_mixed_models <- FALSE
+if (require(lme4, quietly = TRUE)) {
+  if (require(lmerTest, quietly = TRUE)) {
+    use_mixed_models <- TRUE
+  } else {
+    message("Note: lmerTest not available. Mixed effects models will be skipped.")
+  }
+} else {
+  message("Note: lme4 not available. Mixed effects models will be skipped.")
+}
 
 # Load processed data
 load("glp1_processed_data.RData")
@@ -226,7 +242,7 @@ activity_weekly <- activity_with_glp1 %>%
   filter(n_days >= 3)  # At least 3 days in the week
 
 # Fit mixed effects model
-if (nrow(activity_weekly) > 100) {
+if (use_mixed_models && nrow(activity_weekly) > 100) {
   cat("\n=== Mixed Effects Model: Steps over Time ===\n")
 
   # Simple model: intercept + time + post-GLP-1 indicator + random intercept per person
@@ -240,6 +256,10 @@ if (nrow(activity_weekly) > 100) {
   # Get coefficients
   cat("\n=== Model Coefficients ===\n")
   print(tidy(mixed_model))
+} else if (nrow(activity_weekly) > 100) {
+  cat("\n=== Mixed Effects Model: SKIPPED (lme4/lmerTest not available) ===\n")
+  cat("To enable mixed models, install packages:\n")
+  cat("  install.packages(c('lme4', 'lmerTest'))\n")
 }
 
 # =============================================================================
