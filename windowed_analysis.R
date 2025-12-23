@@ -303,15 +303,27 @@ check_active_glp1 <- function(person_id, target_date, drug_data, window_days = 9
 
   if (nrow(person_drugs) == 0) return(FALSE)
 
+  # Ensure dates are Date objects
+  person_drugs <- person_drugs %>%
+    mutate(
+      drug_start_date = as.Date(drug_start_date),
+      drug_end_date = as.Date(drug_end_date)
+    )
+
+  target_date <- as.Date(target_date)
+  cutoff_date <- target_date - window_days
+
   # Check if any prescription within window days before target
   has_recent_rx <- person_drugs %>%
-    filter(drug_start_date <= target_date,
-           drug_start_date >= (target_date - days(window_days))) %>%
+    filter(!is.na(drug_start_date),
+           drug_start_date <= target_date,
+           drug_start_date >= cutoff_date) %>%
     nrow() > 0
 
   # Check if any prescription ongoing at target date
   has_ongoing_rx <- person_drugs %>%
-    filter(drug_start_date <= target_date,
+    filter(!is.na(drug_start_date),
+           drug_start_date <= target_date,
            (is.na(drug_end_date) | drug_end_date >= target_date)) %>%
     nrow() > 0
 
