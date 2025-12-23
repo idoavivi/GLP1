@@ -96,6 +96,14 @@ Alternative analysis approach using time periods instead of specific timepoints:
 - **Output**: Comprehensive table with baseline and all periods including mean ± SD for all metrics
 - **Temporal Trends**: P-values from mixed models showing changes over time
 
+### 8. **period_visualizations.R** - Period Analysis Figures
+Creates publication-quality visualizations for the period-based analysis:
+- **Figure 1**: Weight and steps trajectories across periods with error bars
+- **Figure 2**: Activity composition stacked bar chart (sedentary/light/fairly/very active)
+- **Figure 3**: 4-panel change from baseline (weight, steps, sedentary, very active)
+- **Figure 4**: Sample sizes and retention rates across periods
+- **Figure 5**: Percent change heatmap for all metrics
+
 ## Windowed Analysis Methodology
 
 The windowed analysis provides a rigorous, time-based approach to assess activity changes:
@@ -211,6 +219,13 @@ This approach:
 22. **period_model_results.csv**: Random effects model coefficients and p-values
 23. **period_detailed_stats.csv**: Detailed statistics for each period
 
+### Period Visualization Outputs
+24. **period_figure1_trajectories.png**: Weight and steps trajectories with error bars
+25. **period_figure2_activity_composition.png**: Stacked bar chart of activity intensity
+26. **period_figure3_change_from_baseline.png**: 4-panel change analysis
+27. **period_figure4_sample_sizes.png**: Sample sizes and retention rates
+28. **period_figure5_percent_change.png**: Percent change heatmap
+
 ## Data Structure
 
 ### Activity Data (activity_with_glp1)
@@ -275,6 +290,14 @@ source("windowed_visualizations.R")
 source("period_analysis.R")
 # This creates: period_analysis_results.RData and CSV files
 # Uses random effects models to account for dropout
+```
+
+#### Step 6: Period Analysis Visualizations
+```r
+# Generate figures for period-based analysis (run after Step 5)
+source("period_visualizations.R")
+# This creates: period_figure*.png files
+# Requires period_analysis_results.RData
 ```
 
 #### Optional: Optimized Window Analysis
