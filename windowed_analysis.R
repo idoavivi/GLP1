@@ -313,9 +313,15 @@ check_active_glp1 <- function(person_id, target_date, drug_data, window_days = 9
 
   if (nrow(person_drugs) == 0) return(FALSE)
 
-  # Convert target_date to Date and calculate cutoff
-  target_date_clean <- as.Date(target_date)
-  if (is.na(target_date_clean)) return(FALSE)
+  # Convert target_date to Date and validate
+  if (is.null(target_date) || length(target_date) == 0) return(FALSE)
+
+  target_date_clean <- tryCatch(
+    as.Date(target_date),
+    error = function(e) as.Date(NA)
+  )
+
+  if (length(target_date_clean) == 0 || is.na(target_date_clean)) return(FALSE)
 
   cutoff_date_clean <- target_date_clean - window_days
 
