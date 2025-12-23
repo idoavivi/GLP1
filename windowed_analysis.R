@@ -282,7 +282,7 @@ baseline_min_days <- 7
 # PART 2: POST-GLP1 FOLLOW-UP WINDOWS
 # =============================================================================
 
-cat("\n\n### PART 2: POST-GLP1 FOLLOW-UP WINDOWS ###\n\n")
+cat("\n\n### PART 2: POST-GLP1 FOLLOW-UP WINDOWS (OPTIMIZED) ###\n\n")
 
 # Define follow-up timepoints (days after GLP-1 initiation)
 followup_timepoints <- c(30, 60, 90, 120, 180, 360)
@@ -296,7 +296,168 @@ min_fitbit_days_followup <- 3
 # Active treatment window (prescription within 90 days)
 active_rx_window <- 90
 
-# Function to check if patient has active GLP-1 at timepoint
+cat("Using optimized vectorized approach for follow-up analysis...\n")
+cat(sprintf("Timepoints: %s days\n", paste(followup_timepoints, collapse = ", ")))
+cat(sprintf("Measurement window: ±%d days\n", measurement_window))
+cat(sprintf("Active treatment window: %d days\n\n", active_rx_window))
+
+# =============================================================================
+# STEP 1: Create all patient-timepoint combinations
+# =============================================================================
+
+cat("Step 1: Creating patient-timepoint combinations...\n")
+
+patient_timepoint_grid <- glp1_initiation %>%
+  filter(person_id %in% eligible_person_ids) %>%
+  select(person_id, glp1_initiation_date) %>%
+  crossing(timepoint_days = followup_timepoints) %>%
+  mutate(
+    target_date = glp1_initiation_date + days(timepoint_days),
+    window_start_date = target_date - days(measurement_window),
+    window_end_date = target_date + days(measurement_window),
+    active_rx_cutoff = target_date - days(active_rx_window)
+  )
+
+cat(sprintf("  Created %d patient-timepoint combinations\n\n", nrow(patient_timepoint_grid)))
+
+# =============================================================================
+# STEP 2: Vectorized active treatment check
+# =============================================================================
+
+cat("Step 2: Checking active treatment status (vectorized)...\n")
+
+# Prepare drug data with proper date types
+drug_glp1_clean <- drug_glp1 %>%
+  filter(!is.na(drug_start_date)) %>%
+  mutate(
+    drug_start_date = as.Date(drug_start_date),
+    drug_end_date = if_else(!is.na(drug_end_date), as.Date(drug_end_date), as.Date(NA))
+  )
+
+# Join patient-timepoints with drug data and check active status
+active_treatment_check <- patient_timepoint_grid %>%
+  left_join(drug_glp1_clean, by = "person_id", relationship = "many-to-many") %>%
+  mutate(
+    # Check if prescription within window OR ongoing at target date
+    is_active = (drug_start_date <= target_date & drug_start_date >= active_rx_cutoff) |
+                (drug_start_date <= target_date & (is.na(drug_end_date) | drug_end_date >= target_date))
+  ) %>%
+  group_by(person_id, timepoint_days, target_date, window_start_date, window_end_date, glp1_initiation_date) %>%
+  summarize(has_active_rx = any(is_active, na.rm = TRUE), .groups = "drop") %>%
+  filter(has_active_rx)
+
+cat(sprintf("  %d patient-timepoint combinations with active treatment\n\n",
+            nrow(active_treatment_check)))
+
+# =============================================================================
+# STEP 3: Calculate activity metrics (vectorized)
+# =============================================================================
+
+cat("Step 3: Calculating activity metrics (vectorized)...\n")
+
+# Join with activity data
+activity_metrics <- active_treatment_check %>%
+  inner_join(
+    fitbit_activity_filtered %>% select(person_id, date, steps, sedentary_minutes,
+                                        lightly_active_minutes, fairly_active_minutes,
+                                        very_active_minutes, activity_calories),
+    by = "person_id",
+    relationship = "many-to-many"
+  ) %>%
+  filter(date >= window_start_date, date <= window_end_date) %>%
+  group_by(person_id, timepoint_days, target_date, glp1_initiation_date) %>%
+  summarize(
+    n_fitbit_days = n(),
+    mean_steps = mean(steps, na.rm = TRUE),
+    mean_sedentary_min = mean(sedentary_minutes, na.rm = TRUE),
+    mean_lightly_active_min = mean(lightly_active_minutes, na.rm = TRUE),
+    mean_fairly_active_min = mean(fairly_active_minutes, na.rm = TRUE),
+    mean_very_active_min = mean(very_active_minutes, na.rm = TRUE),
+    mean_activity_calories = mean(activity_calories, na.rm = TRUE),
+    .groups = "drop"
+  ) %>%
+  filter(n_fitbit_days >= min_fitbit_days_followup)
+
+cat(sprintf("  %d patient-timepoint combinations with sufficient activity data\n\n",
+            nrow(activity_metrics)))
+
+# =============================================================================
+# STEP 4: Calculate weight metrics (vectorized)
+# =============================================================================
+
+cat("Step 4: Calculating weight metrics (vectorized)...\n")
+
+# Join with weight data
+weight_metrics <- active_treatment_check %>%
+  inner_join(
+    anthro_completed %>% select(person_id, measurement_date, weight_kg, bmi),
+    by = "person_id",
+    relationship = "many-to-many"
+  ) %>%
+  filter(measurement_date >= window_start_date, measurement_date <= window_end_date,
+         !is.na(weight_kg)) %>%
+  group_by(person_id, timepoint_days, target_date, glp1_initiation_date) %>%
+  summarize(
+    min_weight = min(weight_kg, na.rm = TRUE),
+    min_bmi = first(bmi[weight_kg == min(weight_kg)]),
+    .groups = "drop"
+  )
+
+cat(sprintf("  %d patient-timepoint combinations with weight data\n\n",
+            nrow(weight_metrics)))
+
+# =============================================================================
+# STEP 5: Combine results
+# =============================================================================
+
+cat("Step 5: Combining results...\n")
+
+followup_results <- activity_metrics %>%
+  full_join(weight_metrics, by = c("person_id", "timepoint_days", "target_date", "glp1_initiation_date")) %>%
+  mutate(days_from_initiation = as.numeric(target_date - glp1_initiation_date)) %>%
+  select(person_id, timepoint_days, days_from_initiation,
+         min_weight, min_bmi, mean_steps, mean_sedentary_min,
+         mean_lightly_active_min, mean_fairly_active_min,
+         mean_very_active_min, mean_activity_calories, n_fitbit_days)
+
+cat(sprintf("  Final N = %d patient-timepoint records\n\n", nrow(followup_results)))
+
+# Summarize by timepoint
+followup_summary <- followup_results %>%
+  group_by(timepoint_days) %>%
+  summarize(
+    n_patients = n(),
+    mean_days_from_init = mean(days_from_initiation, na.rm = TRUE),
+    sd_days_from_init = sd(days_from_initiation, na.rm = TRUE),
+    mean_weight = mean(min_weight, na.rm = TRUE),
+    sd_weight = sd(min_weight, na.rm = TRUE),
+    mean_bmi = mean(min_bmi, na.rm = TRUE),
+    sd_bmi = sd(min_bmi, na.rm = TRUE),
+    mean_steps = mean(mean_steps, na.rm = TRUE),
+    sd_steps = sd(mean_steps, na.rm = TRUE),
+    mean_sedentary_min = mean(mean_sedentary_min, na.rm = TRUE),
+    sd_sedentary_min = sd(mean_sedentary_min, na.rm = TRUE),
+    mean_lightly_active_min = mean(mean_lightly_active_min, na.rm = TRUE),
+    sd_lightly_active_min = sd(mean_lightly_active_min, na.rm = TRUE),
+    mean_fairly_active_min = mean(mean_fairly_active_min, na.rm = TRUE),
+    sd_fairly_active_min = sd(mean_fairly_active_min, na.rm = TRUE),
+    mean_very_active_min = mean(mean_very_active_min, na.rm = TRUE),
+    sd_very_active_min = sd(mean_very_active_min, na.rm = TRUE),
+    mean_activity_calories = mean(mean_activity_calories, na.rm = TRUE),
+    sd_activity_calories = sd(mean_activity_calories, na.rm = TRUE),
+    .groups = "drop"
+  )
+
+cat("\n=== FOLLOW-UP TIMEPOINT SUMMARY ===\n\n")
+print(followup_summary, n = Inf)
+
+# =============================================================================
+# PART 3: NADIR WEIGHT ANALYSIS
+# =============================================================================
+
+cat("\n\n### PART 3: NADIR WEIGHT ANALYSIS ###\n\n")
+
+# Helper function for nadir analysis
 check_active_glp1 <- function(person_id, target_date, drug_data, window_days = 90) {
   person_drugs <- drug_data %>%
     filter(person_id == !!person_id)
@@ -341,152 +502,6 @@ check_active_glp1 <- function(person_id, target_date, drug_data, window_days = 9
 
   return(has_recent_rx | has_ongoing_rx)
 }
-
-# Function to calculate metrics for a follow-up timepoint
-calculate_followup_metrics <- function(activity_data, weight_data, drug_data,
-                                      glp1_init_data, timepoint_days,
-                                      window_days = 15, min_days = 3,
-                                      active_rx_days = 90) {
-
-  # Get patients and their target dates
-  patient_dates <- glp1_init_data %>%
-    mutate(target_date = glp1_initiation_date + days(timepoint_days)) %>%
-    select(person_id, glp1_initiation_date, target_date)
-
-  results_list <- list()
-
-  for (i in 1:nrow(patient_dates)) {
-    pid <- patient_dates$person_id[i]
-    tdate <- patient_dates$target_date[i]
-    init_date <- patient_dates$glp1_initiation_date[i]
-
-    # Check active GLP-1
-    is_active <- check_active_glp1(pid, tdate, drug_data, active_rx_days)
-    if (!is_active) next
-
-    # Get activity data in window
-    activity_window <- activity_data %>%
-      filter(person_id == pid,
-             date >= (tdate - days(window_days)),
-             date <= (tdate + days(window_days)))
-
-    # Check minimum days
-    if (nrow(activity_window) < min_days) next
-
-    # Calculate activity metrics
-    activity_metrics <- activity_window %>%
-      summarize(
-        mean_steps = mean(steps, na.rm = TRUE),
-        mean_sedentary_min = mean(sedentary_minutes, na.rm = TRUE),
-        mean_lightly_active_min = mean(lightly_active_minutes, na.rm = TRUE),
-        mean_fairly_active_min = mean(fairly_active_minutes, na.rm = TRUE),
-        mean_very_active_min = mean(very_active_minutes, na.rm = TRUE),
-        mean_activity_calories = mean(activity_calories, na.rm = TRUE),
-        n_days = n()
-      )
-
-    # Get weight in window (lowest weight)
-    weight_window <- weight_data %>%
-      filter(person_id == pid,
-             measurement_date >= (tdate - days(window_days)),
-             measurement_date <= (tdate + days(window_days)))
-
-    if (nrow(weight_window) > 0) {
-      min_weight <- min(weight_window$weight_kg, na.rm = TRUE)
-      min_bmi <- weight_window %>%
-        filter(weight_kg == min_weight) %>%
-        pull(bmi) %>%
-        first()
-    } else {
-      min_weight <- NA
-      min_bmi <- NA
-    }
-
-    # Compile results
-    results_list[[length(results_list) + 1]] <- tibble(
-      person_id = pid,
-      timepoint_days = timepoint_days,
-      days_from_initiation = as.numeric(tdate - init_date),
-      min_weight = min_weight,
-      min_bmi = min_bmi,
-      mean_steps = activity_metrics$mean_steps,
-      mean_sedentary_min = activity_metrics$mean_sedentary_min,
-      mean_lightly_active_min = activity_metrics$mean_lightly_active_min,
-      mean_fairly_active_min = activity_metrics$mean_fairly_active_min,
-      mean_very_active_min = activity_metrics$mean_very_active_min,
-      mean_activity_calories = activity_metrics$mean_activity_calories,
-      n_fitbit_days = activity_metrics$n_days
-    )
-  }
-
-  if (length(results_list) == 0) {
-    return(NULL)
-  }
-
-  bind_rows(results_list)
-}
-
-# Calculate metrics for all timepoints
-cat("Calculating follow-up metrics for each timepoint...\n\n")
-
-followup_results_list <- list()
-
-for (tp in followup_timepoints) {
-  cat(sprintf("Processing day %d...\n", tp))
-
-  results <- calculate_followup_metrics(
-    fitbit_activity_filtered,
-    anthro_completed,
-    drug_glp1,
-    glp1_initiation,
-    timepoint_days = tp,
-    window_days = measurement_window,
-    min_days = min_fitbit_days_followup,
-    active_rx_days = active_rx_window
-  )
-
-  if (!is.null(results)) {
-    followup_results_list[[as.character(tp)]] <- results
-  }
-}
-
-# Combine all timepoint results
-followup_results <- bind_rows(followup_results_list)
-
-# Summarize by timepoint
-followup_summary <- followup_results %>%
-  group_by(timepoint_days) %>%
-  summarize(
-    n_patients = n(),
-    mean_days_from_init = mean(days_from_initiation, na.rm = TRUE),
-    sd_days_from_init = sd(days_from_initiation, na.rm = TRUE),
-    mean_weight = mean(min_weight, na.rm = TRUE),
-    sd_weight = sd(min_weight, na.rm = TRUE),
-    mean_bmi = mean(min_bmi, na.rm = TRUE),
-    sd_bmi = sd(min_bmi, na.rm = TRUE),
-    mean_steps = mean(mean_steps, na.rm = TRUE),
-    sd_steps = sd(mean_steps, na.rm = TRUE),
-    mean_sedentary_min = mean(mean_sedentary_min, na.rm = TRUE),
-    sd_sedentary_min = sd(mean_sedentary_min, na.rm = TRUE),
-    mean_lightly_active_min = mean(mean_lightly_active_min, na.rm = TRUE),
-    sd_lightly_active_min = sd(mean_lightly_active_min, na.rm = TRUE),
-    mean_fairly_active_min = mean(mean_fairly_active_min, na.rm = TRUE),
-    sd_fairly_active_min = sd(mean_fairly_active_min, na.rm = TRUE),
-    mean_very_active_min = mean(mean_very_active_min, na.rm = TRUE),
-    sd_very_active_min = sd(mean_very_active_min, na.rm = TRUE),
-    mean_activity_calories = mean(mean_activity_calories, na.rm = TRUE),
-    sd_activity_calories = sd(mean_activity_calories, na.rm = TRUE),
-    .groups = "drop"
-  )
-
-cat("\n=== FOLLOW-UP TIMEPOINT SUMMARY ===\n\n")
-print(followup_summary, n = Inf)
-
-# =============================================================================
-# PART 3: NADIR WEIGHT ANALYSIS
-# =============================================================================
-
-cat("\n\n### PART 3: NADIR WEIGHT ANALYSIS ###\n\n")
 
 # For each patient, find nadir (lowest weight on treatment)
 nadir_results_list <- list()
