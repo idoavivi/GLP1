@@ -4,8 +4,6 @@
 # =============================================================================
 
 library(tidyverse)
-library(broom)
-library(broom.mixed)
 
 # Load data
 load("glp1_processed_data.RData")
@@ -15,14 +13,25 @@ cat("===========================================================================
 cat("PERIOD-BASED ANALYSIS WITH RANDOM EFFECTS MODELS\n")
 cat("=============================================================================\n\n")
 
-# Check for mixed effects packages
+# Check for optional packages
 use_mixed_models <- FALSE
 if (require(lme4, quietly = TRUE) && require(lmerTest, quietly = TRUE)) {
-  use_mixed_models <- TRUE
-  cat("Mixed effects models: ENABLED\n\n")
+  # Try to load broom.mixed for tidy model output
+  if (require(broom.mixed, quietly = TRUE)) {
+    use_mixed_models <- TRUE
+    cat("Mixed effects models: ENABLED (with broom.mixed for tidy output)\n\n")
+  } else {
+    if (require(broom, quietly = TRUE)) {
+      use_mixed_models <- TRUE
+      cat("Mixed effects models: ENABLED (broom.mixed not available, using broom)\n\n")
+    } else {
+      use_mixed_models <- TRUE
+      cat("Mixed effects models: ENABLED (no tidy output packages)\n\n")
+    }
+  }
 } else {
   cat("WARNING: lme4 and/or lmerTest not available.\n")
-  cat("Install with: install.packages(c('lme4', 'lmerTest'))\n")
+  cat("Install with: install.packages(c('lme4', 'lmerTest', 'broom.mixed'))\n")
   cat("Proceeding with descriptive statistics only.\n\n")
 }
 

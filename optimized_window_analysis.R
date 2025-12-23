@@ -272,8 +272,9 @@ cat(sprintf("  %d patient-timepoint records with activity\n\n", nrow(activity_fo
 
 cat("Step 5: Combining results...\n")
 
+# Activity is REQUIRED (≥3 days), weight is OPTIONAL
 followup_combined <- activity_followup %>%
-  full_join(weight_followup, by = c("person_id", "timepoint_days"))
+  left_join(weight_followup, by = c("person_id", "timepoint_days"))
 
 followup_data_list <- list()
 
@@ -285,7 +286,8 @@ for (tp in followup_timepoints) {
 
   if (nrow(tp_data) > 0) {
     followup_data_list[[paste0("day_", tp)]] <- tp_data
-    cat(sprintf("  Day %d: %d patients\n", tp, nrow(tp_data)))
+    cat(sprintf("  Day %d: %d patients (activity required, weight: %d)\n",
+                tp, nrow(tp_data), sum(!is.na(tp_data$followup_weight))))
   }
 }
 
