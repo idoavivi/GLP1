@@ -94,6 +94,56 @@ for (period_name in names(time_periods)) {
 cat("\n")
 
 # =============================================================================
+# ACTIVE TREATMENT VERIFICATION FUNCTION
+# =============================================================================
+
+# Function to check if patient has active GLP-1 at midpoint of period
+check_active_glp1 <- function(person_id, target_date, drug_data, window_days = 90) {
+  person_drugs <- drug_data %>%
+    filter(person_id == !!person_id)
+
+  if (nrow(person_drugs) == 0) return(FALSE)
+
+  # Ensure dates are Date objects and remove NAs
+  person_drugs <- person_drugs %>%
+    filter(!is.na(drug_start_date)) %>%
+    mutate(
+      drug_start_date = as.Date(drug_start_date),
+      drug_end_date = if_else(!is.na(drug_end_date), as.Date(drug_end_date), as.Date(NA))
+    )
+
+  if (nrow(person_drugs) == 0) return(FALSE)
+
+  # Convert target_date to Date and validate
+  if (is.null(target_date) || length(target_date) == 0) return(FALSE)
+
+  target_date_clean <- tryCatch(
+    as.Date(target_date),
+    error = function(e) as.Date(NA)
+  )
+
+  if (length(target_date_clean) == 0 || is.na(target_date_clean)) return(FALSE)
+
+  cutoff_date_clean <- target_date_clean - window_days
+
+  # Check if any prescription within window days before target
+  has_recent_rx <- any(
+    person_drugs$drug_start_date <= target_date_clean &
+    person_drugs$drug_start_date >= cutoff_date_clean,
+    na.rm = TRUE
+  )
+
+  # Check if any prescription ongoing at target date
+  has_ongoing_rx <- any(
+    person_drugs$drug_start_date <= target_date_clean &
+    (is.na(person_drugs$drug_end_date) | person_drugs$drug_end_date >= target_date_clean),
+    na.rm = TRUE
+  )
+
+  return(has_recent_rx | has_ongoing_rx)
+}
+
+# =============================================================================
 # CALCULATE METRICS FOR EACH PERIOD
 # =============================================================================
 
@@ -105,6 +155,7 @@ for (period_name in names(time_periods)) {
   period_range <- time_periods[[period_name]]
   start_day <- period_range[1]
   end_day <- period_range[2]
+  midpoint_day <- round((start_day + end_day) / 2)
 
   cat(sprintf("Processing %s (days %d-%d)...\n", period_name, start_day, end_day))
 
@@ -138,14 +189,32 @@ for (period_name in names(time_periods)) {
       .groups = "drop"
     )
 
-  # Combine
+  # Check active treatment at midpoint of period
+  # Get initiation dates for calculating midpoint calendar date
+  all_patients <- unique(c(activity_period$person_id, weight_period$person_id))
+
+  active_treatment_status <- tibble(person_id = all_patients) %>%
+    left_join(glp1_initiation %>% select(person_id, glp1_initiation_date), by = "person_id") %>%
+    mutate(
+      midpoint_date = glp1_initiation_date + midpoint_day,
+      is_active = map2_lgl(person_id, midpoint_date,
+                          ~check_active_glp1(.x, .y, drug_glp1, window_days = 90))
+    ) %>%
+    filter(is_active) %>%
+    select(person_id)
+
+  cat(sprintf("  Active treatment at midpoint: %d/%d patients\n",
+              nrow(active_treatment_status), length(all_patients)))
+
+  # Combine and filter to active treatment only
   period_combined <- activity_period %>%
     full_join(weight_period, by = "person_id") %>%
+    inner_join(active_treatment_status, by = "person_id") %>%  # ONLY active treatment
     mutate(period = period_name)
 
   period_data_list[[period_name]] <- period_combined
 
-  cat(sprintf("  N = %d patients (weight: %d, activity: %d)\n",
+  cat(sprintf("  N = %d patients with active treatment (weight: %d, activity: %d)\n",
               nrow(period_combined),
               sum(!is.na(period_combined$period_weight)),
               sum(!is.na(period_combined$period_steps))))

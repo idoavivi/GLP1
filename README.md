@@ -160,7 +160,7 @@ For each time period:
 1. **Weight**: Lowest weight recorded during the period
 2. **Activity**: Average of all activity metrics during the period
 3. **Minimum Data**: At least 3 days of Fitbit data required to be included
-4. **Active Treatment**: Patient must have activity data within the period
+4. **Active Treatment**: Patient must have GLP-1 prescription within 90 days of period midpoint (same as windowed analysis)
 
 ### Statistical Analysis
 **Random Effects Models** (lme4/lmerTest):
