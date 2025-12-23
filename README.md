@@ -50,12 +50,77 @@ For each patient:
 - First GLP-1 prescription date is identified for each patient
 - All data is divided into "before" and "after" periods
 
+## Analysis Scripts
+
+### 1. **glp1_activity_analysis.R** - Initial Data Processing
+Main data loading and preprocessing pipeline. Run this first to create the base datasets.
+
+### 2. **analysis_examples.R** - Basic Statistical Analyses
+Simple before/after comparisons with paired t-tests, correlation analyses, and visualizations.
+
+### 3. **windowed_analysis.R** - Windowed Time-Based Analysis (RECOMMENDED)
+Sophisticated longitudinal analysis with specific time windows:
+- **Baseline Window Selection**: Compares multiple pre-GLP1 windows (-30d to 0, -60d to 0, -90d to 0, -180d to 0) with different minimum Fitbit data requirements (3, 5, 7, 10 days) to select optimal baseline period
+- **Follow-up Timepoints**: Analyzes activity at 30, 60, 90, 120, 180, and 360 days post-initiation
+- **Active Treatment Requirement**: Only includes patients with GLP-1 prescription within 90 days of each timepoint
+- **Nadir Weight Analysis**: Identifies lowest weight during treatment and associated activity levels
+- **Measurement Windows**: Uses ±15 day windows around each timepoint with minimum 3 days of Fitbit data
+
+### 4. **windowed_visualizations.R** - Windowed Analysis Figures
+Creates publication-quality visualizations for the windowed analysis results.
+
+## Windowed Analysis Methodology
+
+The windowed analysis provides a rigorous, time-based approach to assess activity changes:
+
+### Baseline Selection Algorithm
+1. Tests four pre-GLP1 windows: -30 to 0 days, -60 to 0, -90 to 0, -180 to 0
+2. For each window, requires 3, 5, 7, or 10 minimum Fitbit days
+3. Calculates activity score = (total active minutes) - (sedentary minutes / 10)
+4. Recommends window with highest activity engagement
+
+### Follow-up Assessment
+At each timepoint (30, 60, 90, 120, 180, 360 days):
+1. **Eligibility**: Patient must have GLP-1 prescription within 90 days of timepoint
+2. **Measurement Window**: ±15 days around timepoint
+3. **Minimum Data**: At least 3 days of Fitbit data in the window
+4. **Weight**: Lowest weight within the ±15 day window
+5. **Activity**: Mean activity metrics within the ±15 day window
+
+### Nadir Analysis
+1. Identifies lowest weight during treatment for each patient
+2. Requires active GLP-1 at time of nadir (prescription within 90 days)
+3. Calculates activity metrics in ±15 day window around nadir
+4. Reports time from initiation to nadir (mean ± SD)
+
+This approach ensures:
+- Only patients on active treatment are analyzed
+- Sufficient data density for reliable estimates
+- Consistent measurement windows across patients
+- Captures both scheduled timepoints and individualized nadir
+
 ## Key Output Files
 
+### Basic Processing Outputs
 1. **glp1_processed_data.RData**: Complete R workspace with all processed data
 2. **glp1_initiation_dates.csv**: Patient-level GLP-1 initiation information
 3. **activity_by_glp1_period.csv**: Daily Fitbit activity by period (before/after)
 4. **weight_by_glp1_period.csv**: Weight measurements by period (before/after)
+
+### Windowed Analysis Outputs
+5. **windowed_analysis_results.RData**: Complete windowed analysis results
+6. **summary_table.csv**: Formatted summary table (mean ± SD) for all timepoints
+7. **summary_table_raw.csv**: Raw summary with separate mean and SD columns
+8. **followup_individual_data.csv**: Patient-level data at each follow-up timepoint
+9. **nadir_individual_data.csv**: Patient-level nadir weight and activity data
+
+### Visualization Outputs
+10. **figure_trajectories.png**: Weight and steps trajectories over time
+11. **figure_activity_composition.png**: Stacked area chart of activity levels
+12. **figure_change_from_baseline.png**: 4-panel change from baseline analysis
+13. **figure_nadir_analysis.png**: Nadir weight distribution and associations
+14. **figure_sample_sizes.png**: Sample size at each timepoint
+15. **figure_percent_change.png**: Percent change for all metrics
 
 ## Data Structure
 
@@ -85,12 +150,33 @@ Key variables:
 
 ## Usage
 
-### Running the Analysis
+### Step-by-Step Analysis Workflow
+
+#### Step 1: Initial Data Processing
 ```r
 # In All of Us Workbench R/RStudio environment
 source("glp1_activity_analysis.R")
+# This creates: glp1_processed_data.RData
+```
 
-# Or run interactively in RStudio
+#### Step 2: Windowed Analysis (RECOMMENDED)
+```r
+# Run the windowed analysis
+source("windowed_analysis.R")
+# This creates: windowed_analysis_results.RData and CSV files
+```
+
+#### Step 3: Create Visualizations
+```r
+# Generate all figures
+source("windowed_visualizations.R")
+# This creates: PNG figures in current directory
+```
+
+#### Optional: Basic Analyses
+```r
+# For simple before/after comparisons
+source("analysis_examples.R")
 ```
 
 ### Loading Processed Data
@@ -104,6 +190,10 @@ ls()
 # Quick exploration
 summary(activity_with_glp1)
 summary(weight_with_glp1)
+
+# Load windowed analysis results
+load("windowed_analysis_results.RData")
+View(windowed_analysis_results$combined_summary)
 ```
 
 ## Suggested Next Steps
@@ -220,3 +310,4 @@ For questions about this analysis, please refer to the All of Us Research Progra
 
 ## Version History
 - v1.0 (2024): Initial data processing pipeline
+- v2.0 (2024): Added windowed analysis with baseline selection, follow-up timepoints, and nadir analysis
