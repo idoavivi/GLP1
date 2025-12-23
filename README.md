@@ -78,6 +78,24 @@ Creates comprehensive statistical comparison table showing:
 - Mean ± SD for all measurements
 - Change scores and percent change
 
+### 6. **optimized_window_analysis.R** - Optimized Baseline and Follow-up Analysis
+Implements exact specifications for baseline window selection and follow-up analysis:
+- **Baseline Selection**: Tests 5 pre-GLP1 windows (30d, 60d, 90d, 120d, 180d) with specific minimum activity requirements
+- **Selection Criteria**: Chooses window with most patients, highest weight, most activity
+- **Follow-up Timepoints**: Days 30, 60, 90, 120, 180, 365 plus nadir
+- **Weight Measurement**: Lowest weight within ±15 day window
+- **Activity Measurement**: Average activity with minimum 3 days of data within ±15 day window
+- **Active Treatment**: Only includes patients with GLP-1 prescription within 90 days of timepoint
+
+### 7. **period_analysis.R** - Period-Based Analysis with Random Effects Models
+Alternative analysis approach using time periods instead of specific timepoints:
+- **Time Periods**: 1-30d, 31-60d, 61-90d, 91-180d, 181-365d, plus 1-45d, 46-90d post-initiation
+- **Weight**: Lowest weight recorded during each period
+- **Activity**: Average activity metrics during period (minimum 3 days required)
+- **Statistical Method**: Random effects models (lme4/lmerTest) to account for patient dropout
+- **Output**: Comprehensive table with baseline and all periods including mean ± SD for all metrics
+- **Temporal Trends**: P-values from mixed models showing changes over time
+
 ## Windowed Analysis Methodology
 
 The windowed analysis provides a rigorous, time-based approach to assess activity changes:
@@ -115,6 +133,49 @@ This approach ensures:
 - Consistent measurement windows across patients
 - Captures both scheduled timepoints and individualized nadir
 
+## Period-Based Analysis Methodology
+
+The period-based analysis provides an alternative approach using consecutive time periods and mixed effects models:
+
+### Eligibility Criteria
+Same as windowed analysis:
+1. **GLP-1 Therapy**: Initiated injectable semaglutide or tirzepatide
+2. **BMI Criteria**: BMI ≥ 30 OR BMI ≥ 27 with documented obesity diagnosis
+
+### Time Periods
+Seven post-initiation periods are analyzed:
+1. **1-30 days**: First month
+2. **31-60 days**: Second month
+3. **61-90 days**: Third month
+4. **91-180 days**: 3-6 months
+5. **181-365 days**: 6-12 months
+6. **1-45 days**: First 1.5 months (alternative)
+7. **46-90 days**: 1.5-3 months (alternative)
+
+### Baseline
+Uses the optimal baseline window selected from windowed analysis (typically 30-180 days pre-initiation)
+
+### Measurement Approach
+For each time period:
+1. **Weight**: Lowest weight recorded during the period
+2. **Activity**: Average of all activity metrics during the period
+3. **Minimum Data**: At least 3 days of Fitbit data required to be included
+4. **Active Treatment**: Patient must have activity data within the period
+
+### Statistical Analysis
+**Random Effects Models** (lme4/lmerTest):
+- Accounts for repeated measures within patients
+- Handles missing data and dropout
+- Models temporal trends across periods
+- Provides p-values for change over time
+- Random intercepts for each patient
+
+This approach:
+- Captures gradual changes over longer periods
+- Maximizes data utilization within each period
+- Accounts for varying follow-up durations
+- Provides robust inference with dropout
+
 ## Key Output Files
 
 ### Basic Processing Outputs
@@ -142,6 +203,13 @@ This approach ensures:
 16. **statistical_comparisons_table.csv**: Publication-ready table with p-values
 17. **statistical_comparisons_detailed.csv**: Detailed statistical results
 18. **key_findings_summary.csv**: Brief summary of key findings
+
+### Period Analysis Outputs
+19. **period_analysis_results.RData**: Complete period-based analysis results
+20. **period_summary_table.csv**: Summary table with baseline and all periods (mean ± SD)
+21. **period_individual_data.csv**: Patient-level data for each time period
+22. **period_model_results.csv**: Random effects model coefficients and p-values
+23. **period_detailed_stats.csv**: Detailed statistics for each period
 
 ## Data Structure
 
@@ -199,6 +267,20 @@ source("statistical_comparison_table.R")
 # Generate all figures
 source("windowed_visualizations.R")
 # This creates: PNG figures in current directory
+```
+
+#### Step 5 (Alternative): Period-Based Analysis with Random Effects
+```r
+# Run period-based analysis (alternative to timepoint-based)
+source("period_analysis.R")
+# This creates: period_analysis_results.RData and CSV files
+# Uses random effects models to account for dropout
+```
+
+#### Optional: Optimized Window Analysis
+```r
+# For customized baseline selection and follow-up
+source("optimized_window_analysis.R")
 ```
 
 #### Optional: Basic Analyses
