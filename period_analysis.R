@@ -39,17 +39,18 @@ if (require(lme4, quietly = TRUE) && require(lmerTest, quietly = TRUE)) {
 eligible_person_ids <- windowed_analysis_results$eligible_patients$person_id
 
 # =============================================================================
-# BASELINE (from optimized_window_analysis)
+# BASELINE (-180 to 0 days before GLP-1 initiation)
 # =============================================================================
 
 cat("### BASELINE SETUP ###\n\n")
 
-# Use the baseline from windowed analysis results
-baseline_window_info <- windowed_analysis_results$recommended_baseline
-baseline_start <- baseline_window_info$window_start
-baseline_end <- baseline_window_info$window_end
+# FIXED baseline window: -180 to 0 days
+baseline_start <- -180
+baseline_end <- 0
 
-# Get baseline ACTIVITY data
+cat(sprintf("Baseline window: %d to %d days before GLP-1 initiation\n\n", baseline_start, baseline_end))
+
+# Get baseline ACTIVITY data - AVERAGE during baseline period
 baseline_activity <- activity_with_glp1 %>%
   filter(person_id %in% eligible_person_ids,
          days_from_initiation >= baseline_start,
@@ -67,25 +68,25 @@ baseline_activity <- activity_with_glp1 %>%
     .groups = "drop"
   )
 
-# Get baseline WEIGHT data - use HIGHEST weight (starting weight)
+# Get baseline WEIGHT data - LATEST weight before GLP-1 initiation
 baseline_weight <- weight_with_glp1 %>%
   filter(person_id %in% eligible_person_ids,
          days_from_initiation >= baseline_start,
          days_from_initiation <= baseline_end,
          !is.na(weight_kg)) %>%
   group_by(person_id) %>%
-  summarize(baseline_weight = max(weight_kg, na.rm = TRUE), .groups = "drop")  # HIGHEST weight
+  slice_max(measurement_date, n = 1, with_ties = FALSE) %>%  # LATEST weight before initiation
+  ungroup() %>%
+  select(person_id, baseline_weight = weight_kg)
 
 # Create BASELINE COHORT - patients with BOTH activity AND weight at baseline
 baseline_cohort <- baseline_activity %>%
   inner_join(baseline_weight, by = "person_id") %>%
   select(person_id)
 
-cat(sprintf("Baseline: %d to %d days\n", baseline_start, baseline_end))
-cat(sprintf("Activity data: %d patients\n", nrow(baseline_activity)))
-cat(sprintf("Weight data: %d patients\n", nrow(baseline_weight)))
-cat(sprintf("BASELINE COHORT (both activity + weight): %d patients\n\n",
-            nrow(baseline_cohort)))
+cat(sprintf("Patients with baseline activity (≥3 days): %d\n", nrow(baseline_activity)))
+cat(sprintf("Patients with baseline weight: %d\n", nrow(baseline_weight)))
+cat(sprintf("BASELINE COHORT (both activity + weight): %d patients\n\n", nrow(baseline_cohort)))
 
 # Keep full baseline data for this cohort
 baseline_activity_final <- baseline_activity %>%
@@ -93,6 +94,15 @@ baseline_activity_final <- baseline_activity %>%
 
 baseline_weight_final <- baseline_weight %>%
   inner_join(baseline_cohort, by = "person_id")
+
+# Report baseline statistics
+cat(sprintf("Baseline cohort statistics:\n"))
+cat(sprintf("  Mean weight: %.1f kg (SD: %.1f)\n",
+            mean(baseline_weight_final$baseline_weight),
+            sd(baseline_weight_final$baseline_weight)))
+cat(sprintf("  Mean steps: %.0f (SD: %.0f)\n\n",
+            mean(baseline_activity_final$baseline_steps),
+            sd(baseline_activity_final$baseline_steps)))
 
 # =============================================================================
 # DEFINE TIME PERIODS
