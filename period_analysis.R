@@ -871,8 +871,8 @@ if (require(knitr, quietly = TRUE) && require(kableExtra, quietly = TRUE)) {
     ) %>%
     column_spec(1, bold = TRUE, width = "8em") %>%
     column_spec(2, width = "4em") %>%
-    add_header_above(c(" " = 2, "Weight" = 3, "Steps" = 3, "Sedentary" = 2,
-                       "Light" = 2, "Fairly" = 2, "Very" = 2, "Calories" = 2)) %>%
+    add_header_above(c(" " = 3, "Weight" = 4, "Steps" = 4, "Sedentary" = 3,
+                       "Light" = 3, "Fairly" = 3, "Very" = 3, "Calories" = 3)) %>%
     footnote(
       general = c(
         "Baseline: Days -180 to 0 (highest weight, average activity)",
