@@ -136,10 +136,14 @@ Creates publication-quality visualizations for the period-based analysis:
 ### 10. **period_analysis_optimized.R** - Optimized Period Analysis with Baseline Selection and Nadir ⭐ RECOMMENDED
 Streamlined period-based analysis with smart baseline selection:
 
+**Cohort Definition** (CRITICAL):
+- First identifies final 1-90d cohort (with active treatment requirement)
+- Baseline calculated ONLY for patients in this final cohort
+- Ensures baseline N = 1-90d N = N_paired for valid comparisons
+
 **Baseline Selection Algorithm**:
 - Tests 3 candidate windows: -30 to 0d, -90 to 0d, -180 to 0d
 - Selects window with: **HIGHEST weight** + most steps/activity
-- Baseline cohort: only patients who appear in 1-90d follow-up period
 - Single baseline used for ALL comparisons
 
 **Follow-up Periods**:
@@ -612,4 +616,10 @@ For questions about this analysis, please refer to the All of Us Research Progra
   - Added nadir analysis with surrounding activity data (±30 days)
   - Single baseline for all comparisons ensures consistency
   - Streamlined output: one comprehensive table with all timepoints
-  - Fixed spaghetti plot sampling in sensitivity_visualizations.R
+- **v3.2** (2025): Critical fix for baseline cohort matching:
+  - Fixed baseline cohort to match 1-90d period exactly
+  - Now first identifies final 1-90d cohort (with active treatment)
+  - Then calculates baseline ONLY for those patients
+  - Ensures baseline N = 1-90d N = N_paired for valid paired comparisons
+  - Improved handling of missing activity data (NA instead of NaN)
+  - Enhanced documentation with important notes about cohort matching

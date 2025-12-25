@@ -29,11 +29,98 @@ if (require(lme4, quietly = TRUE) && require(lmerTest, quietly = TRUE)) {
 eligible_person_ids <- windowed_analysis_results$eligible_patients$person_id
 
 # =============================================================================
+# STEP 0: DETERMINE FINAL 1-90d COHORT (WITH ACTIVE TREATMENT)
+# =============================================================================
+
+cat("=============================================================================\n")
+cat("STEP 0: DETERMINING FINAL 1-90d COHORT\n")
+cat("=============================================================================\n\n")
+
+# Prepare drug data for active treatment check
+drug_glp1_clean <- drug_glp1 %>%
+  filter(!is.na(drug_start_date)) %>%
+  mutate(
+    drug_start_date = as.Date(drug_start_date),
+    drug_end_date = if_else(!is.na(drug_end_date), as.Date(drug_end_date), as.Date(NA))
+  )
+
+# Activity data for 1-90d period
+activity_1_90d_temp <- activity_with_glp1 %>%
+  filter(person_id %in% eligible_person_ids,
+         days_from_initiation >= 1,
+         days_from_initiation <= 90) %>%
+  mutate(
+    wear_time = sedentary_minutes + lightly_active_minutes +
+                coalesce(fairly_active_minutes, 0) + coalesce(very_active_minutes, 0),
+    MVPA = coalesce(fairly_active_minutes, 0) + coalesce(very_active_minutes, 0)
+  ) %>%
+  group_by(person_id) %>%
+  filter(n() >= 3) %>%
+  summarize(
+    period_steps = mean(steps, na.rm = TRUE),
+    period_sedentary = mean(sedentary_minutes, na.rm = TRUE),
+    period_light = mean(lightly_active_minutes, na.rm = TRUE),
+    period_fairly = mean(fairly_active_minutes, na.rm = TRUE),
+    period_very = mean(very_active_minutes, na.rm = TRUE),
+    period_MVPA = mean(MVPA, na.rm = TRUE),
+    period_calories = mean(activity_calories, na.rm = TRUE),
+    n_period_days = n(),
+    .groups = "drop"
+  )
+
+# Weight data for 1-90d period
+weight_1_90d_temp <- weight_with_glp1 %>%
+  filter(person_id %in% eligible_person_ids,
+         days_from_initiation >= 1,
+         days_from_initiation <= 90,
+         !is.na(weight_kg)) %>%
+  group_by(person_id) %>%
+  summarize(period_weight = min(weight_kg, na.rm = TRUE), .groups = "drop")
+
+# Check active treatment at midpoint (day 45)
+all_patients_temp <- unique(c(activity_1_90d_temp$person_id, weight_1_90d_temp$person_id))
+
+# Require ≥2 prescription fills
+patients_with_multiple_fills <- drug_glp1_clean %>%
+  filter(person_id %in% all_patients_temp) %>%
+  group_by(person_id) %>%
+  summarize(n_fills = n_distinct(drug_start_date), .groups = "drop") %>%
+  filter(n_fills >= 2) %>%
+  select(person_id)
+
+# Check prescription within 90 days of midpoint (day 45)
+active_treatment_1_90d <- tibble(person_id = all_patients_temp) %>%
+  inner_join(patients_with_multiple_fills, by = "person_id") %>%
+  left_join(glp1_initiation %>% select(person_id, glp1_initiation_date), by = "person_id") %>%
+  mutate(
+    midpoint_date = glp1_initiation_date + 45,
+    active_rx_cutoff = midpoint_date - 90
+  ) %>%
+  left_join(drug_glp1_clean, by = "person_id", relationship = "many-to-many") %>%
+  mutate(
+    is_active = (drug_start_date <= midpoint_date & drug_start_date >= active_rx_cutoff) |
+                (drug_start_date <= midpoint_date & (is.na(drug_end_date) | drug_end_date >= midpoint_date))
+  ) %>%
+  group_by(person_id) %>%
+  summarize(has_active_rx = any(is_active, na.rm = TRUE), .groups = "drop") %>%
+  filter(has_active_rx) %>%
+  select(person_id)
+
+# Final 1-90d cohort (with active treatment)
+final_1_90d_cohort <- activity_1_90d_temp %>%
+  full_join(weight_1_90d_temp, by = "person_id") %>%
+  inner_join(active_treatment_1_90d, by = "person_id")
+
+final_cohort_ids <- final_1_90d_cohort$person_id
+
+cat(sprintf("Final 1-90d cohort (with active treatment): %d patients\n\n", length(final_cohort_ids)))
+
+# =============================================================================
 # STEP 1: BASELINE SELECTION ALGORITHM
 # =============================================================================
 
 cat("=============================================================================\n")
-cat("STEP 1: BASELINE SELECTION\n")
+cat("STEP 1: BASELINE SELECTION (FOR FINAL 1-90d COHORT ONLY)\n")
 cat("=============================================================================\n\n")
 
 # Define candidate baseline windows
@@ -43,18 +130,6 @@ baseline_windows <- list(
   "180d" = c(-180, 0)
 )
 
-# Get patients with data in 1-90d follow-up period (our reference period)
-patients_1_90d <- activity_with_glp1 %>%
-  filter(person_id %in% eligible_person_ids,
-         days_from_initiation >= 1,
-         days_from_initiation <= 90) %>%
-  group_by(person_id) %>%
-  filter(n() >= 3) %>%  # Minimum 3 days
-  ungroup() %>%
-  distinct(person_id)
-
-cat(sprintf("Patients with ≥3 days in 1-90d period: %d\n\n", nrow(patients_1_90d)))
-
 # Evaluate each baseline window
 baseline_evaluations <- list()
 
@@ -63,14 +138,15 @@ for (window_name in names(baseline_windows)) {
 
   cat(sprintf("Evaluating baseline window: %d to %d days\n", window[1], window[2]))
 
-  # Get baseline activity for patients in 1-90d period
+  # Get baseline activity for FINAL 1-90d cohort only
   baseline_activity <- activity_with_glp1 %>%
-    inner_join(patients_1_90d, by = "person_id") %>%
-    filter(days_from_initiation >= window[1],
+    filter(person_id %in% final_cohort_ids,
+           days_from_initiation >= window[1],
            days_from_initiation <= window[2]) %>%
     mutate(
-      wear_time = sedentary_minutes + lightly_active_minutes + fairly_active_minutes + very_active_minutes,
-      MVPA = fairly_active_minutes + very_active_minutes
+      wear_time = sedentary_minutes + lightly_active_minutes +
+                  coalesce(fairly_active_minutes, 0) + coalesce(very_active_minutes, 0),
+      MVPA = coalesce(fairly_active_minutes, 0) + coalesce(very_active_minutes, 0)
     ) %>%
     group_by(person_id) %>%
     filter(n() >= 3) %>%
@@ -88,8 +164,8 @@ for (window_name in names(baseline_windows)) {
 
   # Get baseline weight (HIGHEST)
   baseline_weight <- weight_with_glp1 %>%
-    inner_join(patients_1_90d, by = "person_id") %>%
-    filter(days_from_initiation >= window[1],
+    filter(person_id %in% final_cohort_ids,
+           days_from_initiation >= window[1],
            days_from_initiation <= window[2],
            !is.na(weight_kg)) %>%
     group_by(person_id) %>%
@@ -103,7 +179,7 @@ for (window_name in names(baseline_windows)) {
   n_patients <- nrow(baseline_combined)
   mean_weight <- mean(baseline_combined$baseline_weight)
   mean_steps <- mean(baseline_combined$baseline_steps)
-  mean_activity <- mean(baseline_combined$baseline_fairly + baseline_combined$baseline_very)
+  mean_activity <- mean(baseline_combined$baseline_fairly + baseline_combined$baseline_very, na.rm = TRUE)
 
   baseline_evaluations[[window_name]] <- list(
     window = window,
@@ -167,16 +243,12 @@ time_periods <- list(
   "181-365d" = c(181, 365)
 )
 
-# Prepare drug data for active treatment check
-drug_glp1_clean <- drug_glp1 %>%
-  filter(!is.na(drug_start_date)) %>%
-  mutate(
-    drug_start_date = as.Date(drug_start_date),
-    drug_end_date = if_else(!is.na(drug_end_date), as.Date(drug_end_date), as.Date(NA))
-  )
-
-# Get baseline patient IDs
+# Get baseline patient IDs (should match final_cohort_ids)
 baseline_patient_ids <- baseline_data$person_id
+
+cat(sprintf("Baseline cohort: %d patients\n", length(baseline_patient_ids)))
+cat(sprintf("Match with 1-90d cohort: %s\n\n",
+            ifelse(setequal(baseline_patient_ids, final_cohort_ids), "YES", "NO")))
 
 period_data_list <- list()
 
@@ -188,14 +260,24 @@ for (period_name in names(time_periods)) {
 
   cat(sprintf("Processing %s (days %d-%d)...\n", period_name, start_day, end_day))
 
+  # For 1-90d, use the pre-calculated cohort for consistency
+  if (period_name == "1-90d") {
+    period_combined <- final_1_90d_cohort %>%
+      mutate(period = period_name)
+    period_data_list[[period_name]] <- period_combined
+    cat(sprintf("  N = %d patients (using pre-calculated cohort)\n", nrow(period_combined)))
+    next
+  }
+
   # Activity data - ONLY baseline cohort patients
   activity_period <- activity_with_glp1 %>%
     filter(person_id %in% baseline_patient_ids,
            days_from_initiation >= start_day,
            days_from_initiation <= end_day) %>%
     mutate(
-      wear_time = sedentary_minutes + lightly_active_minutes + fairly_active_minutes + very_active_minutes,
-      MVPA = fairly_active_minutes + very_active_minutes
+      wear_time = sedentary_minutes + lightly_active_minutes +
+                  coalesce(fairly_active_minutes, 0) + coalesce(very_active_minutes, 0),
+      MVPA = coalesce(fairly_active_minutes, 0) + coalesce(very_active_minutes, 0)
     ) %>%
     group_by(person_id) %>%
     filter(n() >= 3) %>%
@@ -305,8 +387,9 @@ nadir_activity <- nadir_with_active_check %>%
   ) %>%
   filter(abs(days_from_nadir) <= 30) %>%  # ±30 days from nadir
   mutate(
-    wear_time = sedentary_minutes + lightly_active_minutes + fairly_active_minutes + very_active_minutes,
-    MVPA = fairly_active_minutes + very_active_minutes
+    wear_time = sedentary_minutes + lightly_active_minutes +
+                coalesce(fairly_active_minutes, 0) + coalesce(very_active_minutes, 0),
+    MVPA = coalesce(fairly_active_minutes, 0) + coalesce(very_active_minutes, 0)
   ) %>%
   group_by(person_id) %>%
   filter(n() >= 3) %>%  # Minimum 3 days
@@ -499,37 +582,44 @@ comprehensive_table <- all_results %>%
     Calories_change = Calories_mean - baseline_means$Calories_mean
   ) %>%
   mutate(
-    `Weight (kg)` = sprintf("%.1f ± %.1f", Weight_mean, Weight_sd),
+    `Weight (kg)` = ifelse(is.na(Weight_mean) | is.nan(Weight_mean), "NA",
+                           sprintf("%.1f ± %.1f", Weight_mean, Weight_sd)),
     `Weight Δ` = ifelse(Timepoint == "Baseline", "—",
                         sprintf("%.1f (%.1f%%)", Weight_change, Weight_pct)),
     `Weight p` = ifelse(Timepoint == "Baseline" | is.na(Weight_p), "—",
                        sapply(Weight_p, format_pvalue)),
-    `Steps (n/day)` = sprintf("%.0f ± %.0f", Steps_mean, Steps_sd),
+    `Steps (n/day)` = ifelse(is.na(Steps_mean) | is.nan(Steps_mean), "NA",
+                             sprintf("%.0f ± %.0f", Steps_mean, Steps_sd)),
     `Steps Δ` = ifelse(Timepoint == "Baseline", "—",
                       sprintf("%.0f (%.1f%%)", Steps_change, Steps_pct)),
     `Steps p` = ifelse(Timepoint == "Baseline" | is.na(Steps_p), "—",
                       sapply(Steps_p, format_pvalue)),
-    `Sedentary (min)` = sprintf("%.0f ± %.0f", Sedentary_mean, Sedentary_sd),
+    `Sedentary (min)` = ifelse(is.na(Sedentary_mean) | is.nan(Sedentary_mean), "NA",
+                               sprintf("%.0f ± %.0f", Sedentary_mean, Sedentary_sd)),
     `Sedentary Δ` = ifelse(Timepoint == "Baseline", "—",
                           sprintf("%.0f", Sedentary_change)),
     `Sedentary p` = ifelse(Timepoint == "Baseline" | is.na(Sedentary_p), "—",
                           sapply(Sedentary_p, format_pvalue)),
-    `Light (min)` = sprintf("%.0f ± %.0f", Light_mean, Light_sd),
+    `Light (min)` = ifelse(is.na(Light_mean) | is.nan(Light_mean), "NA",
+                          sprintf("%.0f ± %.0f", Light_mean, Light_sd)),
     `Light Δ` = ifelse(Timepoint == "Baseline", "—",
                       sprintf("%.0f", Light_change)),
     `Light p` = ifelse(Timepoint == "Baseline" | is.na(Light_p), "—",
                       sapply(Light_p, format_pvalue)),
-    `Fairly (min)` = sprintf("%.0f ± %.0f", Fairly_mean, Fairly_sd),
+    `Fairly (min)` = ifelse(is.na(Fairly_mean) | is.nan(Fairly_mean), "NA",
+                           sprintf("%.0f ± %.0f", Fairly_mean, Fairly_sd)),
     `Fairly Δ` = ifelse(Timepoint == "Baseline", "—",
                        sprintf("%.0f", Fairly_change)),
     `Fairly p` = ifelse(Timepoint == "Baseline" | is.na(Fairly_p), "—",
                        sapply(Fairly_p, format_pvalue)),
-    `Very (min)` = sprintf("%.0f ± %.0f", Very_mean, Very_sd),
+    `Very (min)` = ifelse(is.na(Very_mean) | is.nan(Very_mean), "NA",
+                         sprintf("%.0f ± %.0f", Very_mean, Very_sd)),
     `Very Δ` = ifelse(Timepoint == "Baseline", "—",
                      sprintf("%.0f", Very_change)),
     `Very p` = ifelse(Timepoint == "Baseline" | is.na(Very_p), "—",
                      sapply(Very_p, format_pvalue)),
-    `Calories (kcal)` = sprintf("%.0f ± %.0f", Calories_mean, Calories_sd),
+    `Calories (kcal)` = ifelse(is.na(Calories_mean) | is.nan(Calories_mean), "NA",
+                              sprintf("%.0f ± %.0f", Calories_mean, Calories_sd)),
     `Calories Δ` = ifelse(Timepoint == "Baseline", "—",
                          sprintf("%.0f", Calories_change)),
     `Calories p` = ifelse(Timepoint == "Baseline" | is.na(Calories_p), "—",
@@ -553,14 +643,18 @@ cat("COMPREHENSIVE PERIOD ANALYSIS WITH OPTIMIZED BASELINE AND NADIR\n")
 cat("=============================================================================\n\n")
 cat(sprintf("Baseline: Days %d to %d (selected for highest weight + most activity)\n",
             baseline_start, baseline_end))
-cat(sprintf("Baseline N: %d patients (from 1-90d follow-up cohort)\n", nrow(baseline_data)))
+cat(sprintf("Baseline N: %d patients\n", nrow(baseline_data)))
+cat(sprintf("  - IMPORTANT: Baseline includes ONLY patients in final 1-90d cohort\n"))
+cat(sprintf("  - This ensures same patients at baseline and follow-up\n\n"))
 cat("Follow-up Periods: 1-90d, 91-180d, 181-365d\n")
 cat("Nadir: Lowest on-treatment weight (activity = mean of ±30 days)\n\n")
-cat("Weight: HIGHEST at baseline, LOWEST during follow-up\n")
-cat("Activity: AVERAGE during period (≥3 days required)\n")
-cat("Eligibility: Active treatment (≥2 fills, Rx within 90 days)\n\n")
+cat("Measurement Strategy:\n")
+cat("  - Weight: HIGHEST at baseline, LOWEST during follow-up\n")
+cat("  - Activity: AVERAGE during period (≥3 days required)\n")
+cat("  - Eligibility: Active treatment (≥2 fills, Rx within 90 days at period midpoint)\n\n")
 cat("Statistical Tests: Paired t-tests (each timepoint vs baseline)\n")
-cat("*** p<0.001, ** p<0.01, * p<0.05\n\n")
+cat("*** p<0.001, ** p<0.01, * p<0.05\n")
+cat("\nNOTE: 'NA' values indicate insufficient data for that metric\n\n")
 
 print(comprehensive_table, n = Inf, width = Inf)
 
@@ -592,11 +686,14 @@ if (require(knitr, quietly = TRUE) && require(kableExtra, quietly = TRUE)) {
     footnote(
       general = c(
         sprintf("Baseline: Days %d to %d (selected for highest weight + most activity)", baseline_start, baseline_end),
+        sprintf("IMPORTANT: Baseline includes ONLY patients in final 1-90d cohort (N=%d)", nrow(baseline_data)),
+        "This ensures same patients at baseline and follow-up for valid paired comparisons",
         "Follow-up: 1-90d, 91-180d, 181-365d, plus Nadir",
         "Nadir: Lowest on-treatment weight (activity = mean of ±30 days)",
-        "Active treatment: ≥2 prescription fills, Rx within 90 days",
+        "Active treatment: ≥2 prescription fills, Rx within 90 days at period midpoint",
         "Statistical Tests: Paired t-tests (each timepoint vs baseline)",
-        "*** p<0.001, ** p<0.01, * p<0.05"
+        "*** p<0.001, ** p<0.01, * p<0.05",
+        "NA values indicate insufficient data for that metric"
       ),
       general_title = "Notes:"
     )
@@ -616,13 +713,16 @@ if (require(knitr, quietly = TRUE) && require(kableExtra, quietly = TRUE)) {
     "tr:nth-child(even) { background-color: #f2f2f2; }\n",
     "tr:hover { background-color: #ddd; }\n",
     ".notes { margin-top: 20px; font-size: 0.9em; color: #666; }\n",
+    ".important { color: #d9534f; font-weight: bold; }\n",
     "</style>\n",
     "</head>\n<body>\n",
     "<h1>GLP-1 Period Analysis - Optimized with Baseline Selection and Nadir</h1>\n",
-    sprintf("<p><strong>Baseline:</strong> Days %d to %d (highest weight, average activity)<br>\n", baseline_start, baseline_end),
+    sprintf("<p><strong>Baseline:</strong> Days %d to %d (highest weight + most activity)<br>\n", baseline_start, baseline_end),
+    sprintf("<span class='important'>IMPORTANT:</span> Baseline includes ONLY patients in final 1-90d cohort (N=%d)<br>\n", nrow(baseline_data)),
+    "This ensures same patients at baseline and follow-up for valid paired comparisons<br><br>\n",
     "<strong>Follow-up:</strong> 1-90d, 91-180d, 181-365d, plus Nadir<br>\n",
     "<strong>Nadir:</strong> Lowest on-treatment weight (activity = mean of ±30 days)<br>\n",
-    "<strong>Active treatment:</strong> ≥2 prescription fills, Rx within 90 days<br>\n",
+    "<strong>Active treatment:</strong> ≥2 prescription fills, Rx within 90 days at period midpoint<br>\n",
     "<strong>Statistical Tests:</strong> Paired t-tests (each timepoint vs baseline)</p>\n"
   )
 
@@ -648,7 +748,8 @@ if (require(knitr, quietly = TRUE) && require(kableExtra, quietly = TRUE)) {
     "<p><strong>Notes:</strong><br>\n",
     "*** p<0.001, ** p<0.01, * p<0.05<br>\n",
     "Δ = Change from baseline<br>\n",
-    "p = P-value from paired t-test</p>\n",
+    "p = P-value from paired t-test<br>\n",
+    "NA = Insufficient data for that metric</p>\n",
     "</div>\n",
     "</body>\n</html>"
   )
