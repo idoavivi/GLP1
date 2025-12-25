@@ -623,3 +623,11 @@ For questions about this analysis, please refer to the All of Us Research Progra
   - Ensures baseline N = 1-90d N = N_paired for valid paired comparisons
   - Improved handling of missing activity data (NA instead of NaN)
   - Enhanced documentation with important notes about cohort matching
+- **v3.3** (2025): Complete rewrite of cohort matching algorithm:
+  - CRITICAL FIX: Baseline N now EXACTLY matches 1-90d N (not just subset)
+  - New strategy: Find patients with BOTH baseline AND 1-90d data first
+  - Then select best baseline window from those matched patients only
+  - Fixed nadir to ONLY use on-treatment weights (days > 0, not baseline)
+  - Fixed missing activity data by ensuring matched cohort throughout
+  - All periods now use exact same matched cohort (no more mismatches)
+  - Updated all documentation to emphasize matched cohort requirement

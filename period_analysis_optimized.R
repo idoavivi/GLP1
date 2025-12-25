@@ -29,12 +29,14 @@ if (require(lme4, quietly = TRUE) && require(lmerTest, quietly = TRUE)) {
 eligible_person_ids <- windowed_analysis_results$eligible_patients$person_id
 
 # =============================================================================
-# STEP 0: DETERMINE FINAL 1-90d COHORT (WITH ACTIVE TREATMENT)
+# STEP 0: BASELINE SELECTION AND COHORT MATCHING
 # =============================================================================
 
 cat("=============================================================================\n")
-cat("STEP 0: DETERMINING FINAL 1-90d COHORT\n")
+cat("STEP 0: BASELINE SELECTION AND COHORT MATCHING\n")
 cat("=============================================================================\n\n")
+
+cat("Strategy: Find patients with BOTH baseline AND 1-90d data, then select best baseline\n\n")
 
 # Prepare drug data for active treatment check
 drug_glp1_clean <- drug_glp1 %>%
@@ -44,16 +46,20 @@ drug_glp1_clean <- drug_glp1 %>%
     drug_end_date = if_else(!is.na(drug_end_date), as.Date(drug_end_date), as.Date(NA))
   )
 
-# Activity data for 1-90d period
-activity_1_90d_temp <- activity_with_glp1 %>%
+# Define candidate baseline windows
+baseline_windows <- list(
+  "30d" = c(-30, 0),
+  "90d" = c(-90, 0),
+  "180d" = c(-180, 0)
+)
+
+# First, get 1-90d period data (activity + weight + active treatment)
+cat("Step 1: Identifying patients with 1-90d period data...\n")
+
+period_1_90d_activity <- activity_with_glp1 %>%
   filter(person_id %in% eligible_person_ids,
          days_from_initiation >= 1,
          days_from_initiation <= 90) %>%
-  mutate(
-    wear_time = sedentary_minutes + lightly_active_minutes +
-                coalesce(fairly_active_minutes, 0) + coalesce(very_active_minutes, 0),
-    MVPA = coalesce(fairly_active_minutes, 0) + coalesce(very_active_minutes, 0)
-  ) %>%
   group_by(person_id) %>%
   filter(n() >= 3) %>%
   summarize(
@@ -62,14 +68,13 @@ activity_1_90d_temp <- activity_with_glp1 %>%
     period_light = mean(lightly_active_minutes, na.rm = TRUE),
     period_fairly = mean(fairly_active_minutes, na.rm = TRUE),
     period_very = mean(very_active_minutes, na.rm = TRUE),
-    period_MVPA = mean(MVPA, na.rm = TRUE),
+    period_MVPA = mean(coalesce(fairly_active_minutes, 0) + coalesce(very_active_minutes, 0), na.rm = TRUE),
     period_calories = mean(activity_calories, na.rm = TRUE),
     n_period_days = n(),
     .groups = "drop"
   )
 
-# Weight data for 1-90d period
-weight_1_90d_temp <- weight_with_glp1 %>%
+period_1_90d_weight <- weight_with_glp1 %>%
   filter(person_id %in% eligible_person_ids,
          days_from_initiation >= 1,
          days_from_initiation <= 90,
@@ -77,19 +82,20 @@ weight_1_90d_temp <- weight_with_glp1 %>%
   group_by(person_id) %>%
   summarize(period_weight = min(weight_kg, na.rm = TRUE), .groups = "drop")
 
-# Check active treatment at midpoint (day 45)
-all_patients_temp <- unique(c(activity_1_90d_temp$person_id, weight_1_90d_temp$person_id))
+# Combine activity + weight for 1-90d (require BOTH)
+period_1_90d_combined <- period_1_90d_activity %>%
+  inner_join(period_1_90d_weight, by = "person_id")
 
-# Require ≥2 prescription fills
+# Check active treatment at midpoint (day 45)
 patients_with_multiple_fills <- drug_glp1_clean %>%
-  filter(person_id %in% all_patients_temp) %>%
+  filter(person_id %in% period_1_90d_combined$person_id) %>%
   group_by(person_id) %>%
   summarize(n_fills = n_distinct(drug_start_date), .groups = "drop") %>%
   filter(n_fills >= 2) %>%
   select(person_id)
 
-# Check prescription within 90 days of midpoint (day 45)
-active_treatment_1_90d <- tibble(person_id = all_patients_temp) %>%
+active_treatment_1_90d <- period_1_90d_combined %>%
+  select(person_id) %>%
   inner_join(patients_with_multiple_fills, by = "person_id") %>%
   left_join(glp1_initiation %>% select(person_id, glp1_initiation_date), by = "person_id") %>%
   mutate(
@@ -106,31 +112,16 @@ active_treatment_1_90d <- tibble(person_id = all_patients_temp) %>%
   filter(has_active_rx) %>%
   select(person_id)
 
-# Final 1-90d cohort (with active treatment)
-final_1_90d_cohort <- activity_1_90d_temp %>%
-  full_join(weight_1_90d_temp, by = "person_id") %>%
+# Final 1-90d data with active treatment
+period_1_90d_final <- period_1_90d_combined %>%
   inner_join(active_treatment_1_90d, by = "person_id")
 
-final_cohort_ids <- final_1_90d_cohort$person_id
+patients_with_1_90d <- period_1_90d_final$person_id
+cat(sprintf("  Patients with 1-90d data (activity + weight + active treatment): %d\n\n", length(patients_with_1_90d)))
 
-cat(sprintf("Final 1-90d cohort (with active treatment): %d patients\n\n", length(final_cohort_ids)))
+# Now evaluate baseline windows ONLY for patients who have 1-90d data
+cat("Step 2: Evaluating baseline windows for these patients...\n\n")
 
-# =============================================================================
-# STEP 1: BASELINE SELECTION ALGORITHM
-# =============================================================================
-
-cat("=============================================================================\n")
-cat("STEP 1: BASELINE SELECTION (FOR FINAL 1-90d COHORT ONLY)\n")
-cat("=============================================================================\n\n")
-
-# Define candidate baseline windows
-baseline_windows <- list(
-  "30d" = c(-30, 0),
-  "90d" = c(-90, 0),
-  "180d" = c(-180, 0)
-)
-
-# Evaluate each baseline window
 baseline_evaluations <- list()
 
 for (window_name in names(baseline_windows)) {
@@ -138,16 +129,11 @@ for (window_name in names(baseline_windows)) {
 
   cat(sprintf("Evaluating baseline window: %d to %d days\n", window[1], window[2]))
 
-  # Get baseline activity for FINAL 1-90d cohort only
+  # Get baseline activity for patients with 1-90d data
   baseline_activity <- activity_with_glp1 %>%
-    filter(person_id %in% final_cohort_ids,
+    filter(person_id %in% patients_with_1_90d,
            days_from_initiation >= window[1],
            days_from_initiation <= window[2]) %>%
-    mutate(
-      wear_time = sedentary_minutes + lightly_active_minutes +
-                  coalesce(fairly_active_minutes, 0) + coalesce(very_active_minutes, 0),
-      MVPA = coalesce(fairly_active_minutes, 0) + coalesce(very_active_minutes, 0)
-    ) %>%
     group_by(person_id) %>%
     filter(n() >= 3) %>%
     summarize(
@@ -156,22 +142,22 @@ for (window_name in names(baseline_windows)) {
       baseline_light = mean(lightly_active_minutes, na.rm = TRUE),
       baseline_fairly = mean(fairly_active_minutes, na.rm = TRUE),
       baseline_very = mean(very_active_minutes, na.rm = TRUE),
-      baseline_MVPA = mean(MVPA, na.rm = TRUE),
+      baseline_MVPA = mean(coalesce(fairly_active_minutes, 0) + coalesce(very_active_minutes, 0), na.rm = TRUE),
       baseline_calories = mean(activity_calories, na.rm = TRUE),
       n_baseline_days = n(),
       .groups = "drop"
     )
 
-  # Get baseline weight (HIGHEST)
+  # Get baseline weight (HIGHEST) for patients with 1-90d data
   baseline_weight <- weight_with_glp1 %>%
-    filter(person_id %in% final_cohort_ids,
+    filter(person_id %in% patients_with_1_90d,
            days_from_initiation >= window[1],
            days_from_initiation <= window[2],
            !is.na(weight_kg)) %>%
     group_by(person_id) %>%
     summarize(baseline_weight = max(weight_kg, na.rm = TRUE), .groups = "drop")
 
-  # Combine
+  # Combine baseline activity + weight (require BOTH)
   baseline_combined <- baseline_activity %>%
     inner_join(baseline_weight, by = "person_id")
 
@@ -190,7 +176,7 @@ for (window_name in names(baseline_windows)) {
     data = baseline_combined
   )
 
-  cat(sprintf("  N patients: %d\n", n_patients))
+  cat(sprintf("  N patients with baseline data: %d\n", n_patients))
   cat(sprintf("  Mean weight: %.1f kg\n", mean_weight))
   cat(sprintf("  Mean steps: %.0f\n", mean_steps))
   cat(sprintf("  Mean activity: %.1f min/day\n\n", mean_activity))
@@ -228,12 +214,21 @@ baseline_data <- baseline_evaluations[[selected_baseline]]$data
 baseline_start <- baseline_windows[[selected_baseline]][1]
 baseline_end <- baseline_windows[[selected_baseline]][2]
 
+# Final matched cohort: patients with BOTH baseline AND 1-90d data
+final_cohort_ids <- baseline_data$person_id
+
+cat("=============================================================================\n")
+cat(sprintf("FINAL MATCHED COHORT: %d patients\n", length(final_cohort_ids)))
+cat("  - These patients have BOTH baseline AND 1-90d data\n")
+cat("  - All comparisons will use this exact same cohort\n")
+cat("=============================================================================\n\n")
+
 # =============================================================================
-# STEP 2: CALCULATE FOLLOW-UP PERIODS (1-90d, 91-180d, 181-365d)
+# STEP 1: CALCULATE FOLLOW-UP PERIODS (1-90d, 91-180d, 181-365d)
 # =============================================================================
 
 cat("=============================================================================\n")
-cat("STEP 2: CALCULATING FOLLOW-UP PERIODS\n")
+cat("STEP 1: CALCULATING FOLLOW-UP PERIODS\n")
 cat("=============================================================================\n\n")
 
 # Define follow-up periods
@@ -242,13 +237,6 @@ time_periods <- list(
   "91-180d" = c(91, 180),
   "181-365d" = c(181, 365)
 )
-
-# Get baseline patient IDs (should match final_cohort_ids)
-baseline_patient_ids <- baseline_data$person_id
-
-cat(sprintf("Baseline cohort: %d patients\n", length(baseline_patient_ids)))
-cat(sprintf("Match with 1-90d cohort: %s\n\n",
-            ifelse(setequal(baseline_patient_ids, final_cohort_ids), "YES", "NO")))
 
 period_data_list <- list()
 
@@ -260,25 +248,21 @@ for (period_name in names(time_periods)) {
 
   cat(sprintf("Processing %s (days %d-%d)...\n", period_name, start_day, end_day))
 
-  # For 1-90d, use the pre-calculated cohort for consistency
+  # For 1-90d, use the already-calculated data filtered to final cohort
   if (period_name == "1-90d") {
-    period_combined <- final_1_90d_cohort %>%
+    period_combined <- period_1_90d_final %>%
+      filter(person_id %in% final_cohort_ids) %>%
       mutate(period = period_name)
     period_data_list[[period_name]] <- period_combined
-    cat(sprintf("  N = %d patients (using pre-calculated cohort)\n", nrow(period_combined)))
+    cat(sprintf("  N = %d patients (matched cohort)\n", nrow(period_combined)))
     next
   }
 
-  # Activity data - ONLY baseline cohort patients
+  # Activity data - ONLY matched cohort patients
   activity_period <- activity_with_glp1 %>%
-    filter(person_id %in% baseline_patient_ids,
+    filter(person_id %in% final_cohort_ids,
            days_from_initiation >= start_day,
            days_from_initiation <= end_day) %>%
-    mutate(
-      wear_time = sedentary_minutes + lightly_active_minutes +
-                  coalesce(fairly_active_minutes, 0) + coalesce(very_active_minutes, 0),
-      MVPA = coalesce(fairly_active_minutes, 0) + coalesce(very_active_minutes, 0)
-    ) %>%
     group_by(person_id) %>%
     filter(n() >= 3) %>%
     summarize(
@@ -287,7 +271,7 @@ for (period_name in names(time_periods)) {
       period_light = mean(lightly_active_minutes, na.rm = TRUE),
       period_fairly = mean(fairly_active_minutes, na.rm = TRUE),
       period_very = mean(very_active_minutes, na.rm = TRUE),
-      period_MVPA = mean(MVPA, na.rm = TRUE),
+      period_MVPA = mean(coalesce(fairly_active_minutes, 0) + coalesce(very_active_minutes, 0), na.rm = TRUE),
       period_calories = mean(activity_calories, na.rm = TRUE),
       n_period_days = n(),
       .groups = "drop"
@@ -295,7 +279,7 @@ for (period_name in names(time_periods)) {
 
   # Weight data - LOWEST weight
   weight_period <- weight_with_glp1 %>%
-    filter(person_id %in% baseline_patient_ids,
+    filter(person_id %in% final_cohort_ids,
            days_from_initiation >= start_day,
            days_from_initiation <= end_day,
            !is.na(weight_kg)) %>%
@@ -345,17 +329,17 @@ for (period_name in names(time_periods)) {
 cat("\n")
 
 # =============================================================================
-# STEP 3: CALCULATE NADIR WEIGHT AND ACTIVITY
+# STEP 2: CALCULATE NADIR WEIGHT AND ACTIVITY
 # =============================================================================
 
 cat("=============================================================================\n")
-cat("STEP 3: CALCULATING NADIR WEIGHT AND ACTIVITY\n")
+cat("STEP 2: CALCULATING NADIR WEIGHT AND ACTIVITY\n")
 cat("=============================================================================\n\n")
 
-# Find nadir (lowest on-treatment weight) for each patient
+# Find nadir (lowest on-treatment weight) for each patient in matched cohort
 nadir_weights <- weight_with_glp1 %>%
-  filter(person_id %in% baseline_patient_ids,
-         days_from_initiation > 0,  # On treatment only
+  filter(person_id %in% final_cohort_ids,
+         days_from_initiation > 0,  # MUST be on-treatment (not baseline)
          !is.na(weight_kg)) %>%
   group_by(person_id) %>%
   slice_min(weight_kg, n = 1, with_ties = FALSE) %>%
@@ -386,11 +370,6 @@ nadir_activity <- nadir_with_active_check %>%
     days_from_nadir = days_from_initiation - days_to_nadir
   ) %>%
   filter(abs(days_from_nadir) <= 30) %>%  # ±30 days from nadir
-  mutate(
-    wear_time = sedentary_minutes + lightly_active_minutes +
-                coalesce(fairly_active_minutes, 0) + coalesce(very_active_minutes, 0),
-    MVPA = coalesce(fairly_active_minutes, 0) + coalesce(very_active_minutes, 0)
-  ) %>%
   group_by(person_id) %>%
   filter(n() >= 3) %>%  # Minimum 3 days
   summarize(
@@ -399,7 +378,7 @@ nadir_activity <- nadir_with_active_check %>%
     nadir_light = mean(lightly_active_minutes, na.rm = TRUE),
     nadir_fairly = mean(fairly_active_minutes, na.rm = TRUE),
     nadir_very = mean(very_active_minutes, na.rm = TRUE),
-    nadir_MVPA = mean(MVPA, na.rm = TRUE),
+    nadir_MVPA = mean(coalesce(fairly_active_minutes, 0) + coalesce(very_active_minutes, 0), na.rm = TRUE),
     nadir_calories = mean(activity_calories, na.rm = TRUE),
     n_nadir_days = n(),
     .groups = "drop"
@@ -416,11 +395,11 @@ cat(sprintf("Mean time to nadir: %.1f ± %.1f days\n\n",
             sd(nadir_data$days_to_nadir)))
 
 # =============================================================================
-# STEP 4: CREATE COMPREHENSIVE TABLE WITH PAIRED T-TESTS
+# STEP 3: CREATE COMPREHENSIVE TABLE WITH PAIRED T-TESTS
 # =============================================================================
 
 cat("=============================================================================\n")
-cat("STEP 4: CREATING COMPREHENSIVE TABLE WITH STATISTICAL TESTS\n")
+cat("STEP 3: CREATING COMPREHENSIVE TABLE WITH STATISTICAL TESTS\n")
 cat("=============================================================================\n\n")
 
 # Function to format p-value
@@ -641,13 +620,13 @@ comprehensive_table <- all_results %>%
 cat("=============================================================================\n")
 cat("COMPREHENSIVE PERIOD ANALYSIS WITH OPTIMIZED BASELINE AND NADIR\n")
 cat("=============================================================================\n\n")
+cat(sprintf("MATCHED COHORT: %d patients\n", nrow(baseline_data)))
+cat(sprintf("  - These patients have BOTH baseline AND 1-90d data\n"))
+cat(sprintf("  - Baseline N = 1-90d N = N_paired (exact match)\n\n"))
 cat(sprintf("Baseline: Days %d to %d (selected for highest weight + most activity)\n",
             baseline_start, baseline_end))
-cat(sprintf("Baseline N: %d patients\n", nrow(baseline_data)))
-cat(sprintf("  - IMPORTANT: Baseline includes ONLY patients in final 1-90d cohort\n"))
-cat(sprintf("  - This ensures same patients at baseline and follow-up\n\n"))
 cat("Follow-up Periods: 1-90d, 91-180d, 181-365d\n")
-cat("Nadir: Lowest on-treatment weight (activity = mean of ±30 days)\n\n")
+cat("Nadir: Lowest on-treatment weight (>0 days, activity = mean of ±30 days)\n\n")
 cat("Measurement Strategy:\n")
 cat("  - Weight: HIGHEST at baseline, LOWEST during follow-up\n")
 cat("  - Activity: AVERAGE during period (≥3 days required)\n")
@@ -685,11 +664,11 @@ if (require(knitr, quietly = TRUE) && require(kableExtra, quietly = TRUE)) {
                        "Light" = 3, "Fairly" = 3, "Very" = 3, "Calories" = 3)) %>%
     footnote(
       general = c(
+        sprintf("MATCHED COHORT: N=%d patients with BOTH baseline AND 1-90d data", nrow(baseline_data)),
+        "Baseline N = 1-90d N = N_paired (exact match for valid paired comparisons)",
         sprintf("Baseline: Days %d to %d (selected for highest weight + most activity)", baseline_start, baseline_end),
-        sprintf("IMPORTANT: Baseline includes ONLY patients in final 1-90d cohort (N=%d)", nrow(baseline_data)),
-        "This ensures same patients at baseline and follow-up for valid paired comparisons",
         "Follow-up: 1-90d, 91-180d, 181-365d, plus Nadir",
-        "Nadir: Lowest on-treatment weight (activity = mean of ±30 days)",
+        "Nadir: Lowest on-treatment weight (>0 days, activity = mean of ±30 days)",
         "Active treatment: ≥2 prescription fills, Rx within 90 days at period midpoint",
         "Statistical Tests: Paired t-tests (each timepoint vs baseline)",
         "*** p<0.001, ** p<0.01, * p<0.05",
@@ -717,11 +696,11 @@ if (require(knitr, quietly = TRUE) && require(kableExtra, quietly = TRUE)) {
     "</style>\n",
     "</head>\n<body>\n",
     "<h1>GLP-1 Period Analysis - Optimized with Baseline Selection and Nadir</h1>\n",
-    sprintf("<p><strong>Baseline:</strong> Days %d to %d (highest weight + most activity)<br>\n", baseline_start, baseline_end),
-    sprintf("<span class='important'>IMPORTANT:</span> Baseline includes ONLY patients in final 1-90d cohort (N=%d)<br>\n", nrow(baseline_data)),
-    "This ensures same patients at baseline and follow-up for valid paired comparisons<br><br>\n",
+    sprintf("<p><span class='important'>MATCHED COHORT:</span> N=%d patients with BOTH baseline AND 1-90d data<br>\n", nrow(baseline_data)),
+    "<strong>Baseline N = 1-90d N = N_paired (exact match)</strong><br><br>\n",
+    sprintf("<strong>Baseline:</strong> Days %d to %d (highest weight + most activity)<br>\n", baseline_start, baseline_end),
     "<strong>Follow-up:</strong> 1-90d, 91-180d, 181-365d, plus Nadir<br>\n",
-    "<strong>Nadir:</strong> Lowest on-treatment weight (activity = mean of ±30 days)<br>\n",
+    "<strong>Nadir:</strong> Lowest on-treatment weight (>0 days, activity = mean of ±30 days)<br>\n",
     "<strong>Active treatment:</strong> ≥2 prescription fills, Rx within 90 days at period midpoint<br>\n",
     "<strong>Statistical Tests:</strong> Paired t-tests (each timepoint vs baseline)</p>\n"
   )
