@@ -133,7 +133,33 @@ Creates publication-quality visualizations for the period-based analysis:
 - **Figure 4**: Sample sizes and retention rates across periods
 - **Figure 5**: Percent change heatmap for all metrics
 
-### 10. **sensitivity_visualizations.R** - Sensitivity Analysis Figures
+### 10. **period_analysis_optimized.R** - Optimized Period Analysis with Baseline Selection and Nadir ⭐ RECOMMENDED
+Streamlined period-based analysis with smart baseline selection:
+
+**Baseline Selection Algorithm**:
+- Tests 3 candidate windows: -30 to 0d, -90 to 0d, -180 to 0d
+- Selects window with: **HIGHEST weight** + most steps/activity
+- Baseline cohort: only patients who appear in 1-90d follow-up period
+- Single baseline used for ALL comparisons
+
+**Follow-up Periods**:
+- **1-90d**: First 3 months
+- **91-180d**: 3-6 months
+- **181-365d**: 6-12 months
+- **Nadir**: Lowest on-treatment weight (mean ± SD days to nadir reported)
+
+**Nadir Analysis**:
+- Finds lowest weight during treatment for each patient
+- Activity = mean of ±30 days around nadir
+- Requires active treatment at nadir (≥2 fills, Rx within 90 days)
+
+**Statistical Methods**:
+- Paired t-tests for each timepoint vs baseline
+- Same baseline cohort for all comparisons
+
+**Output**: Single comprehensive table with Baseline + 3 periods + Nadir, including N, N_paired, mean ± SD, Δ, and p-values for all metrics
+
+### 11. **sensitivity_visualizations.R** - Sensitivity Analysis Figures
 Creates visualizations for stratification analyses:
 
 **Figure 1 - Activity by Weight Loss Category**:
@@ -293,12 +319,17 @@ This approach:
 37. **period_figure4_sample_sizes.png**: Sample sizes and retention rates
 38. **period_figure5_percent_change.png**: Percent change heatmap
 
+### Optimized Period Analysis Outputs (with Baseline Selection and Nadir)
+39. **period_analysis_optimized_table.csv**: Comprehensive table with Baseline + 3 periods + Nadir
+40. **period_analysis_optimized_detailed.csv**: Detailed results with all calculated values
+41. **period_analysis_optimized_results.RData**: All data for further analysis and visualization
+
 ### Sensitivity Visualization Outputs
-39. **sensitivity_figure1_activity_by_weight_loss.png**: Steps and calories by weight loss category (2-panel)
-40. **sensitivity_figure2_weight_by_step_change.png**: Weight change by step change category
-41. **sensitivity_figure3_weight_by_step_change_nadir.png**: Weight change to nadir by step change category
-42. **sensitivity_figure4_spaghetti_weight_by_category.png**: Individual weight trajectories by weight loss category
-43. **sensitivity_figure5_spaghetti_steps_by_category.png**: Individual steps trajectories by weight loss category
+42. **sensitivity_figure1_activity_by_weight_loss.png**: Steps and calories by weight loss category (2-panel)
+43. **sensitivity_figure2_weight_by_step_change.png**: Weight change by step change category
+44. **sensitivity_figure3_weight_by_step_change_nadir.png**: Weight change to nadir by step change category
+45. **sensitivity_figure4_spaghetti_weight_by_category.png**: Individual weight trajectories by weight loss category
+46. **sensitivity_figure5_spaghetti_steps_by_category.png**: Individual steps trajectories by weight loss category
 
 ## Data Structure
 
@@ -358,13 +389,26 @@ source("windowed_visualizations.R")
 # This creates: PNG figures in current directory
 ```
 
+#### Step 5 (RECOMMENDED): Optimized Period Analysis with Baseline Selection and Nadir
+```r
+# Run optimized period-based analysis (RECOMMENDED approach)
+source("period_analysis_optimized.R")
+# This creates: period_analysis_optimized_table.csv and period_analysis_optimized_results.RData
+# Features:
+# - Smart baseline selection (tests -30d, -90d, -180d windows)
+# - 3 key periods: 1-90d, 91-180d, 181-365d
+# - Nadir analysis with activity data (±30 days)
+# - Single comprehensive table with all comparisons
+```
+
 #### Step 5 (Alternative): Period-Based Analysis with Period-Specific Baselines
 ```r
-# Run period-based analysis with paired t-tests (alternative to timepoint-based)
+# Run period-based analysis with period-specific baselines (alternative approach)
 source("period_analysis.R")
 # This creates: period_analysis_results.RData, comprehensive_table.csv/html, and diagnostic CSVs
 # Uses period-specific baselines for proper paired comparison
 # Includes paired t-tests AND random effects models
+# More periods (8 total) with individual baselines for each
 ```
 
 #### Step 6: Sensitivity Analyses - Stratification by Weight Loss and Step Change
@@ -552,3 +596,11 @@ For questions about this analysis, please refer to the All of Us Research Progra
   - Created sensitivity_analysis.R for weight loss and step change stratification
   - HTML output for comprehensive tables
   - Enhanced documentation and interpretation guides
+- **v3.1** (2025): Optimized period analysis with smart baseline selection:
+  - Created period_analysis_optimized.R (RECOMMENDED approach)
+  - Automated baseline selection algorithm (tests -30d, -90d, -180d)
+  - Focused on 3 key periods: 1-90d, 91-180d, 181-365d
+  - Added nadir analysis with surrounding activity data (±30 days)
+  - Single baseline for all comparisons ensures consistency
+  - Streamlined output: one comprehensive table with all timepoints
+  - Fixed spaghetti plot sampling in sensitivity_visualizations.R
