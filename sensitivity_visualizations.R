@@ -376,8 +376,10 @@ if (exists("all_data_long")) {
   sampled_patients <- weight_trajectory_data %>%
     group_by(weight_loss_cat) %>%
     distinct(person_id) %>%
-    slice_sample(n = min(30, n())) %>%
-    ungroup()
+    {
+      group_split(.) %>%
+        map_dfr(~ slice_sample(.x, n = min(30, nrow(.x))))
+    }
 
   weight_trajectory_sample <- weight_trajectory_data %>%
     inner_join(sampled_patients, by = c("person_id", "weight_loss_cat"))
