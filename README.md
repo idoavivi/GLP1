@@ -157,33 +157,39 @@ Streamlined period-based analysis with smart baseline selection:
 - Paired t-tests for each timepoint vs baseline
 - Same baseline cohort for all comparisons
 
-**Output**: Single comprehensive table with Baseline + 3 periods + Nadir, including N, N_paired, mean ± SD, Δ, and p-values for all metrics
+**Output**:
+- CSV table: Baseline + 3 periods + Nadir with N, N_paired, mean ± SD, Δ, and p-values
+- HTML table: Formatted version for easy viewing in browser
 
-### 11. **sensitivity_visualizations.R** - Sensitivity Analysis Figures
-Creates visualizations for stratification analyses:
+### 11. **sensitivity_visualizations.R** - Sensitivity Analysis Figures (for Optimized Periods)
+Creates visualizations using the optimized period analysis timepoints:
 
-**Figure 1 - Activity by Weight Loss Category**:
-- Steps and calories at baseline vs follow-up
-- Automatically selects period with highest difference between weight loss groups
-- Two-panel plot showing those who lose more weight increase activity more
+**Categorization**: Patients grouped by baseline-to-nadir weight loss (< 5%, 5-10%, > 10%)
 
-**Figure 2 - Weight by Step Change Category (Period)**:
-- Weight at baseline vs follow-up by step change category
-- Selects period with highest weight difference
-- Shows those who increase steps lose more weight
+**Figure 1 - Weight Trajectories**:
+- All 5 timepoints: Baseline, 1-90d, 91-180d, 181-365d, Nadir
+- Sample sizes (n) displayed at each timepoint
+- Mean ± SE with error bars
 
-**Figure 3 - Weight by Step Change Category (Nadir)**:
-- Weight at baseline vs nadir (lowest weight achieved)
-- Same step change categorization
-- Demonstrates relationship to maximum weight loss
+**Figure 2 - Steps Trajectories**:
+- Daily steps across all 5 timepoints
+- Sample sizes at each timepoint
 
-**Figures 4 & 5 - Spaghetti Plots**:
-- Individual patient trajectories for weight and steps
-- Stratified by weight loss category
-- Samples up to 30 patients per group for clarity
-- Bold mean trajectory with SE ribbon
+**Figure 3 - Calories Trajectories**:
+- Activity calories across all 5 timepoints
+- Sample sizes at each timepoint
 
-All figures: 300 dpi, publication-ready formatting
+**Figure 4 - Combined 3-Panel**:
+- Weight, Steps, Calories in one view
+- All timepoints shown with shared legend
+
+**Figures 5 & 6 - Spaghetti Plots**:
+- Individual patient trajectories (up to 30 per category)
+- Weight and steps over time
+- Bold mean line with SE ribbon
+
+Color scheme: Red (< 5% loss), Orange (5-10% loss), Green (> 10% loss)
+All figures: 300 dpi, publication-ready
 
 ## Windowed Analysis Methodology
 
@@ -321,15 +327,17 @@ This approach:
 
 ### Optimized Period Analysis Outputs (with Baseline Selection and Nadir)
 39. **period_analysis_optimized_table.csv**: Comprehensive table with Baseline + 3 periods + Nadir
-40. **period_analysis_optimized_detailed.csv**: Detailed results with all calculated values
-41. **period_analysis_optimized_results.RData**: All data for further analysis and visualization
+40. **period_analysis_optimized_table.html**: Formatted HTML version of comprehensive table
+41. **period_analysis_optimized_detailed.csv**: Detailed results with all calculated values
+42. **period_analysis_optimized_results.RData**: All data for further analysis and visualization
 
-### Sensitivity Visualization Outputs
-42. **sensitivity_figure1_activity_by_weight_loss.png**: Steps and calories by weight loss category (2-panel)
-43. **sensitivity_figure2_weight_by_step_change.png**: Weight change by step change category
-44. **sensitivity_figure3_weight_by_step_change_nadir.png**: Weight change to nadir by step change category
-45. **sensitivity_figure4_spaghetti_weight_by_category.png**: Individual weight trajectories by weight loss category
-46. **sensitivity_figure5_spaghetti_steps_by_category.png**: Individual steps trajectories by weight loss category
+### Sensitivity Visualization Outputs (Optimized Timepoints Version)
+43. **sensitivity_figure1_weight_trajectories_by_category.png**: Weight across all 5 timepoints by weight loss category
+44. **sensitivity_figure2_steps_trajectories_by_category.png**: Steps across all 5 timepoints by weight loss category
+45. **sensitivity_figure3_calories_trajectories_by_category.png**: Calories across all 5 timepoints by weight loss category
+46. **sensitivity_figure4_combined_trajectories.png**: 3-panel figure (Weight, Steps, Calories)
+47. **sensitivity_figure5_spaghetti_weight.png**: Individual weight trajectories by weight loss category
+48. **sensitivity_figure6_spaghetti_steps.png**: Individual steps trajectories by weight loss category
 
 ## Data Structure
 
@@ -428,14 +436,15 @@ source("period_visualizations.R")
 # Requires period_analysis_results.RData
 ```
 
-#### Step 8: Sensitivity Analysis Visualizations
+#### Step 8: Sensitivity Analysis Visualizations (for Optimized Periods)
 ```r
-# Generate figures for sensitivity analyses (run after Step 6)
+# Generate figures using optimized period timepoints (run after Step 5 RECOMMENDED)
 source("sensitivity_visualizations.R")
-# This creates: sensitivity_figure*.png files
-# Requires both sensitivity_analysis_results.RData and period_analysis_results.RData
-# Automatically selects periods with highest between-group differences
-# Creates spaghetti plots showing individual trajectories
+# This creates: 6 sensitivity_figure*.png files
+# Requires period_analysis_optimized_results.RData from Step 5 (RECOMMENDED)
+# Shows ALL timepoints: Baseline, 1-90d, 91-180d, 181-365d, Nadir
+# Categorizes patients by baseline-to-nadir weight loss
+# Sample sizes displayed at each timepoint
 ```
 
 #### Optional: Optimized Window Analysis
