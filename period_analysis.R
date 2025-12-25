@@ -499,26 +499,32 @@ change_table <- changes_from_baseline %>%
          `Fairly Δ`, `Very Δ`, `Calories Δ`)
 
 # =============================================================================
-# PAIRED T-TESTS: Each Period vs Baseline
+# PERIOD-SPECIFIC BASELINES AND PAIRED T-TESTS
 # =============================================================================
 
-cat("### CALCULATING PAIRED T-TESTS ###\n\n")
+cat("### CALCULATING PERIOD-SPECIFIC BASELINES & PAIRED T-TESTS ###\n\n")
+cat("Note: Each period's baseline includes ONLY patients who appear in that period\n")
+cat("      This ensures proper paired comparison (same patients at baseline and follow-up)\n\n")
 
-# Get baseline data for each patient
-baseline_data <- all_data_long %>%
+# Get all baseline data
+baseline_data_all <- all_data_long %>%
   filter(period == "Baseline") %>%
   select(person_id, baseline_weight = weight, baseline_steps = steps,
          baseline_sedentary = sedentary, baseline_light = light,
          baseline_fairly = fairly, baseline_very = very,
          baseline_calories = calories)
 
-# Calculate paired t-tests for each period
+# Get period names
 period_names <- unique(all_data_long$period)
 period_names <- period_names[period_names != "Baseline"]
 
+# Initialize results lists
+period_specific_results <- list()
 paired_test_results <- list()
 
 for (pname in period_names) {
+  cat(sprintf("Processing %s...\n", pname))
+
   # Get period data
   period_data <- all_data_long %>%
     filter(period == pname) %>%
@@ -527,77 +533,192 @@ for (pname in period_names) {
            period_fairly = fairly, period_very = very,
            period_calories = calories)
 
-  # Merge with baseline (only patients in both)
-  merged <- baseline_data %>%
-    inner_join(period_data, by = "person_id") %>%
-    filter(!is.na(baseline_weight), !is.na(period_weight))
+  # Get baseline data for patients in this period
+  baseline_data_period <- baseline_data_all %>%
+    inner_join(period_data %>% select(person_id), by = "person_id")
 
-  if (nrow(merged) < 10) {
-    next  # Skip if too few paired observations
+  # Calculate baseline statistics for THIS period's cohort
+  baseline_stats <- baseline_data_period %>%
+    summarize(
+      Period = paste0(pname, "_baseline"),
+      N = n(),
+      weight_mean = mean(baseline_weight, na.rm = TRUE),
+      weight_sd = sd(baseline_weight, na.rm = TRUE),
+      steps_mean = mean(baseline_steps, na.rm = TRUE),
+      steps_sd = sd(baseline_steps, na.rm = TRUE),
+      sedentary_mean = mean(baseline_sedentary, na.rm = TRUE),
+      sedentary_sd = sd(baseline_sedentary, na.rm = TRUE),
+      light_mean = mean(baseline_light, na.rm = TRUE),
+      light_sd = sd(baseline_light, na.rm = TRUE),
+      fairly_mean = mean(baseline_fairly, na.rm = TRUE),
+      fairly_sd = sd(baseline_fairly, na.rm = TRUE),
+      very_mean = mean(baseline_very, na.rm = TRUE),
+      very_sd = sd(baseline_very, na.rm = TRUE),
+      calories_mean = mean(baseline_calories, na.rm = TRUE),
+      calories_sd = sd(baseline_calories, na.rm = TRUE)
+    )
+
+  # Calculate period statistics
+  period_stats <- period_data %>%
+    summarize(
+      Period = pname,
+      N = n(),
+      weight_mean = mean(period_weight, na.rm = TRUE),
+      weight_sd = sd(period_weight, na.rm = TRUE),
+      steps_mean = mean(period_steps, na.rm = TRUE),
+      steps_sd = sd(period_steps, na.rm = TRUE),
+      sedentary_mean = mean(period_sedentary, na.rm = TRUE),
+      sedentary_sd = sd(period_sedentary, na.rm = TRUE),
+      light_mean = mean(period_light, na.rm = TRUE),
+      light_sd = sd(period_light, na.rm = TRUE),
+      fairly_mean = mean(period_fairly, na.rm = TRUE),
+      fairly_sd = sd(period_fairly, na.rm = TRUE),
+      very_mean = mean(period_very, na.rm = TRUE),
+      very_sd = sd(period_very, na.rm = TRUE),
+      calories_mean = mean(period_calories, na.rm = TRUE),
+      calories_sd = sd(period_calories, na.rm = TRUE)
+    )
+
+  # Merge baseline and period data for paired analysis
+  merged <- baseline_data_period %>%
+    inner_join(period_data, by = "person_id")
+
+  # Filter to complete pairs (both baseline and period data)
+  merged_complete <- merged %>%
+    filter(!is.na(baseline_weight), !is.na(period_weight),
+           !is.na(baseline_steps), !is.na(period_steps))
+
+  if (nrow(merged_complete) < 10) {
+    cat(sprintf("  WARNING: Only %d complete pairs, skipping t-tests\n", nrow(merged_complete)))
+    next
   }
 
   # Run paired t-tests
-  tests <- list(
-    weight = t.test(merged$period_weight, merged$baseline_weight, paired = TRUE),
-    steps = t.test(merged$period_steps, merged$baseline_steps, paired = TRUE),
-    sedentary = t.test(merged$period_sedentary, merged$baseline_sedentary, paired = TRUE),
-    light = t.test(merged$period_light, merged$baseline_light, paired = TRUE),
-    fairly = t.test(merged$period_fairly, merged$baseline_fairly, paired = TRUE),
-    very = t.test(merged$period_very, merged$baseline_very, paired = TRUE),
-    calories = t.test(merged$period_calories, merged$baseline_calories, paired = TRUE)
+  weight_test <- t.test(merged_complete$period_weight, merged_complete$baseline_weight, paired = TRUE)
+  steps_test <- t.test(merged_complete$period_steps, merged_complete$baseline_steps, paired = TRUE)
+  sedentary_test <- t.test(merged_complete$period_sedentary, merged_complete$baseline_sedentary, paired = TRUE)
+  light_test <- t.test(merged_complete$period_light, merged_complete$baseline_light, paired = TRUE)
+  fairly_test <- t.test(merged_complete$period_fairly, merged_complete$baseline_fairly, paired = TRUE)
+  very_test <- t.test(merged_complete$period_very, merged_complete$baseline_very, paired = TRUE)
+  calories_test <- t.test(merged_complete$period_calories, merged_complete$baseline_calories, paired = TRUE)
+
+  # Calculate changes
+  weight_change <- period_stats$weight_mean - baseline_stats$weight_mean
+  weight_pct <- 100 * weight_change / baseline_stats$weight_mean
+  steps_change <- period_stats$steps_mean - baseline_stats$steps_mean
+  steps_pct <- 100 * steps_change / baseline_stats$steps_mean
+  sedentary_change <- period_stats$sedentary_mean - baseline_stats$sedentary_mean
+  light_change <- period_stats$light_mean - baseline_stats$light_mean
+  fairly_change <- period_stats$fairly_mean - baseline_stats$fairly_mean
+  very_change <- period_stats$very_mean - baseline_stats$very_mean
+  calories_change <- period_stats$calories_mean - baseline_stats$calories_mean
+
+  # Store results
+  period_specific_results[[pname]] <- list(
+    baseline = baseline_stats,
+    period = period_stats,
+    n_paired = nrow(merged_complete)
   )
 
   paired_test_results[[pname]] <- tibble(
     Period = pname,
-    N_paired = nrow(merged),
-    weight_p = tests$weight$p.value,
-    steps_p = tests$steps$p.value,
-    sedentary_p = tests$sedentary$p.value,
-    light_p = tests$light$p.value,
-    fairly_p = tests$fairly$p.value,
-    very_p = tests$very$p.value,
-    calories_p = tests$calories$p.value
+    N = period_stats$N,
+    N_paired = nrow(merged_complete),
+    # Baseline values
+    baseline_weight = baseline_stats$weight_mean,
+    baseline_weight_sd = baseline_stats$weight_sd,
+    baseline_steps = baseline_stats$steps_mean,
+    baseline_steps_sd = baseline_stats$steps_sd,
+    baseline_sedentary = baseline_stats$sedentary_mean,
+    baseline_sedentary_sd = baseline_stats$sedentary_sd,
+    baseline_light = baseline_stats$light_mean,
+    baseline_light_sd = baseline_stats$light_sd,
+    baseline_fairly = baseline_stats$fairly_mean,
+    baseline_fairly_sd = baseline_stats$fairly_sd,
+    baseline_very = baseline_stats$very_mean,
+    baseline_very_sd = baseline_stats$very_sd,
+    baseline_calories = baseline_stats$calories_mean,
+    baseline_calories_sd = baseline_stats$calories_sd,
+    # Period values
+    period_weight = period_stats$weight_mean,
+    period_weight_sd = period_stats$weight_sd,
+    period_steps = period_stats$steps_mean,
+    period_steps_sd = period_stats$steps_sd,
+    period_sedentary = period_stats$sedentary_mean,
+    period_sedentary_sd = period_stats$sedentary_sd,
+    period_light = period_stats$light_mean,
+    period_light_sd = period_stats$light_sd,
+    period_fairly = period_stats$fairly_mean,
+    period_fairly_sd = period_stats$fairly_sd,
+    period_very = period_stats$very_mean,
+    period_very_sd = period_stats$very_sd,
+    period_calories = period_stats$calories_mean,
+    period_calories_sd = period_stats$calories_sd,
+    # Changes
+    weight_change = weight_change,
+    weight_pct = weight_pct,
+    steps_change = steps_change,
+    steps_pct = steps_pct,
+    sedentary_change = sedentary_change,
+    light_change = light_change,
+    fairly_change = fairly_change,
+    very_change = very_change,
+    calories_change = calories_change,
+    # P-values
+    weight_p = weight_test$p.value,
+    steps_p = steps_test$p.value,
+    sedentary_p = sedentary_test$p.value,
+    light_p = light_test$p.value,
+    fairly_p = fairly_test$p.value,
+    very_p = very_test$p.value,
+    calories_p = calories_test$p.value
   )
 
-  cat(sprintf("  %s: N=%d pairs\n", pname, nrow(merged)))
+  cat(sprintf("  N=%d patients, %d complete pairs\n", period_stats$N, nrow(merged_complete)))
 }
 
+# Combine all results
 paired_test_table <- bind_rows(paired_test_results)
 
-# Create comprehensive publication table with stats
-comprehensive_table <- publication_table %>%
-  left_join(
-    paired_test_table %>% select(Period, N_paired, weight_p, steps_p, sedentary_p,
-                                  light_p, fairly_p, very_p, calories_p),
-    by = "Period"
-  ) %>%
-  left_join(
-    changes_from_baseline %>% select(period, weight_change, weight_pct,
-                                     steps_change, steps_pct),
-    by = c("Period" = "period")
-  ) %>%
+# Create comprehensive publication table
+comprehensive_table <- paired_test_table %>%
   mutate(
-    `Weight Δ` = ifelse(!is.na(weight_change),
-                        sprintf("%.1f (%.1f%%)", weight_change, weight_pct),
-                        "—"),
-    `Weight p` = ifelse(!is.na(weight_p), sapply(weight_p, format_pvalue), "—"),
-    `Steps Δ` = ifelse(!is.na(steps_change),
-                       sprintf("%.0f (%.1f%%)", steps_change, steps_pct),
-                       "—"),
-    `Steps p` = ifelse(!is.na(steps_p), sapply(steps_p, format_pvalue), "—"),
-    `Sed p` = ifelse(!is.na(sedentary_p), sapply(sedentary_p, format_pvalue), "—"),
-    `Light p` = ifelse(!is.na(light_p), sapply(light_p, format_pvalue), "—"),
-    `Fairly p` = ifelse(!is.na(fairly_p), sapply(fairly_p, format_pvalue), "—"),
-    `Very p` = ifelse(!is.na(very_p), sapply(very_p, format_pvalue), "—"),
-    `Cal p` = ifelse(!is.na(calories_p), sapply(calories_p, format_pvalue), "—")
+    # Format baseline values
+    `Baseline Weight (kg)` = sprintf("%.1f ± %.1f", baseline_weight, baseline_weight_sd),
+    `Baseline Steps` = sprintf("%.0f ± %.0f", baseline_steps, baseline_steps_sd),
+    # Format period values
+    `Weight (kg)` = sprintf("%.1f ± %.1f", period_weight, period_weight_sd),
+    `Steps (n/day)` = sprintf("%.0f ± %.0f", period_steps, period_steps_sd),
+    `Sedentary (min)` = sprintf("%.0f ± %.0f", period_sedentary, period_sedentary_sd),
+    `Light Active (min)` = sprintf("%.0f ± %.0f", period_light, period_light_sd),
+    `Fairly Active (min)` = sprintf("%.0f ± %.0f", period_fairly, period_fairly_sd),
+    `Very Active (min)` = sprintf("%.0f ± %.0f", period_very, period_very_sd),
+    `Activity Cal (kcal)` = sprintf("%.0f ± %.0f", period_calories, period_calories_sd),
+    # Format changes
+    `Weight Δ` = sprintf("%.1f (%.1f%%)", weight_change, weight_pct),
+    `Steps Δ` = sprintf("%.0f (%.1f%%)", steps_change, steps_pct),
+    `Sedentary Δ` = sprintf("%.0f", sedentary_change),
+    `Light Δ` = sprintf("%.0f", light_change),
+    `Fairly Δ` = sprintf("%.0f", fairly_change),
+    `Very Δ` = sprintf("%.0f", very_change),
+    `Calories Δ` = sprintf("%.0f", calories_change),
+    # Format p-values
+    `Weight p` = sapply(weight_p, format_pvalue),
+    `Steps p` = sapply(steps_p, format_pvalue),
+    `Sed p` = sapply(sedentary_p, format_pvalue),
+    `Light p` = sapply(light_p, format_pvalue),
+    `Fairly p` = sapply(fairly_p, format_pvalue),
+    `Very p` = sapply(very_p, format_pvalue),
+    `Cal p` = sapply(calories_p, format_pvalue)
   ) %>%
-  select(Period, N, `Weight (kg)`, `Weight Δ`, `Weight p`,
-         `Steps (n/day)`, `Steps Δ`, `Steps p`,
-         `Sedentary (min)`, `Sed p`,
-         `Light Active (min)`, `Light p`,
-         `Fairly Active (min)`, `Fairly p`,
-         `Very Active (min)`, `Very p`,
-         `Activity Cal (kcal)`, `Cal p`)
+  select(Period, N, N_paired,
+         `Baseline Weight (kg)`, `Weight (kg)`, `Weight Δ`, `Weight p`,
+         `Baseline Steps`, `Steps (n/day)`, `Steps Δ`, `Steps p`,
+         `Sedentary (min)`, `Sedentary Δ`, `Sed p`,
+         `Light Active (min)`, `Light Δ`, `Light p`,
+         `Fairly Active (min)`, `Fairly Δ`, `Fairly p`,
+         `Very Active (min)`, `Very Δ`, `Very p`,
+         `Activity Cal (kcal)`, `Calories Δ`, `Cal p`)
 
 cat("\n")
 
@@ -680,12 +801,15 @@ cat("\n")
 # =============================================================================
 
 cat("=============================================================================\n")
-cat("COMPREHENSIVE PUBLICATION TABLE\n")
+cat("COMPREHENSIVE PUBLICATION TABLE WITH PERIOD-SPECIFIC BASELINES\n")
 cat("=============================================================================\n\n")
-cat(sprintf("Baseline: Days %d to %d (highest weight, average activity)\n", baseline_start, baseline_end))
-cat("Follow-up Periods: Multiple periods with active treatment (≥2 fills)\n")
-cat("Weight: Lowest in period | Activity: Average in period (≥3 days)\n")
-cat("Statistical Tests: Paired t-tests (each period vs baseline, same patients)\n")
+cat(sprintf("Baseline Window: Days %d to %d before GLP-1 initiation\n", baseline_start, baseline_end))
+cat("Baseline Method: HIGHEST weight, AVERAGE activity (≥3 days)\n")
+cat("Follow-up Method: LOWEST weight, AVERAGE activity (≥3 days)\n")
+cat("Eligibility: Active treatment (≥2 prescription fills, prescription within 90 days)\n\n")
+cat("IMPORTANT: Each period has its own baseline calculated from patients in that period\n")
+cat("           This ensures proper paired comparison (N_paired = same patients)\n\n")
+cat("Statistical Tests: Paired t-tests (each period vs its specific baseline)\n")
 cat("*** p<0.001, ** p<0.01, * p<0.05\n\n")
 
 print(comprehensive_table, n = Inf, width = Inf)
@@ -693,11 +817,14 @@ print(comprehensive_table, n = Inf, width = Inf)
 cat("\n=============================================================================\n")
 cat("INTERPRETATION GUIDE\n")
 cat("=============================================================================\n")
-cat("• N: Number of patients with data in this period\n")
-cat("• Mean ± SD: Descriptive statistics for each metric\n")
-cat("• Δ: Change from baseline (absolute and percent for weight/steps)\n")
-cat("• p: P-value from paired t-test comparing period to baseline\n")
-cat("• Only patients with BOTH baseline and period data are included in t-tests\n")
+cat("• Period: Time period after GLP-1 initiation\n")
+cat("• N: Total number of patients with data in this period\n")
+cat("• N_paired: Number of patients with BOTH baseline and period data\n")
+cat("• Baseline columns: Statistics for patients in THIS period at baseline\n")
+cat("• Period columns: Statistics for patients during follow-up period\n")
+cat("• Δ: Change from baseline (absolute and % for weight/steps)\n")
+cat("• p: P-value from paired t-test (period vs baseline, same patients)\n")
+cat("• Each period has its own baseline cohort for proper paired analysis\n")
 cat("=============================================================================\n\n")
 
 if (use_mixed_models) {
