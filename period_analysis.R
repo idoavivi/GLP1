@@ -55,6 +55,11 @@ baseline_activity <- activity_with_glp1 %>%
   filter(person_id %in% eligible_person_ids,
          days_from_initiation >= baseline_start,
          days_from_initiation <= baseline_end) %>%
+  # Calculate wear time and MVPA for each day
+  mutate(
+    wear_time = sedentary_minutes + lightly_active_minutes + fairly_active_minutes + very_active_minutes,
+    MVPA = fairly_active_minutes + very_active_minutes
+  ) %>%
   group_by(person_id) %>%
   filter(n() >= 3) %>%  # Minimum 3 days
   summarize(
@@ -63,7 +68,13 @@ baseline_activity <- activity_with_glp1 %>%
     baseline_light = mean(lightly_active_minutes, na.rm = TRUE),
     baseline_fairly = mean(fairly_active_minutes, na.rm = TRUE),
     baseline_very = mean(very_active_minutes, na.rm = TRUE),
+    baseline_MVPA = mean(MVPA, na.rm = TRUE),
     baseline_calories = mean(activity_calories, na.rm = TRUE),
+    baseline_wear_time = mean(wear_time, na.rm = TRUE),
+    # Calculate % of wear time
+    baseline_sedentary_pct = mean(100 * sedentary_minutes / wear_time, na.rm = TRUE),
+    baseline_light_pct = mean(100 * lightly_active_minutes / wear_time, na.rm = TRUE),
+    baseline_MVPA_pct = mean(100 * MVPA / wear_time, na.rm = TRUE),
     n_baseline_days = n(),
     .groups = "drop"
   )
@@ -78,13 +89,29 @@ baseline_weight <- weight_with_glp1 %>%
   summarize(baseline_weight = max(weight_kg, na.rm = TRUE), .groups = "drop")  # HIGHEST weight
 
 # Create BASELINE COHORT - patients with BOTH activity AND weight at baseline
+# AND who have follow-up data in first period (1-30d)
+cat("Checking for follow-up data in first period (1-30d)...\n")
+
+first_period_patients <- activity_with_glp1 %>%
+  filter(person_id %in% eligible_person_ids,
+         days_from_initiation >= 1,
+         days_from_initiation <= 30) %>%
+  group_by(person_id) %>%
+  filter(n() >= 3) %>%  # Minimum 3 days
+  ungroup() %>%
+  distinct(person_id)
+
+cat(sprintf("  Patients with ≥3 days in period 1-30d: %d\n\n", nrow(first_period_patients)))
+
 baseline_cohort <- baseline_activity %>%
   inner_join(baseline_weight, by = "person_id") %>%
+  inner_join(first_period_patients, by = "person_id") %>%  # REQUIRE follow-up in first period
   select(person_id)
 
 cat(sprintf("Patients with baseline activity (≥3 days): %d\n", nrow(baseline_activity)))
 cat(sprintf("Patients with baseline weight: %d\n", nrow(baseline_weight)))
-cat(sprintf("BASELINE COHORT (both activity + weight): %d patients\n\n", nrow(baseline_cohort)))
+cat(sprintf("Patients with follow-up in 1-30d: %d\n", nrow(first_period_patients)))
+cat(sprintf("BASELINE COHORT (all criteria met): %d patients\n\n", nrow(baseline_cohort)))
 
 # Keep full baseline data for this cohort
 baseline_activity_final <- baseline_activity %>%
@@ -112,8 +139,9 @@ time_periods <- list(
   "1-30d" = c(1, 30),
   "31-60d" = c(31, 60),
   "61-90d" = c(61, 90),
-  "91-180d" = c(91, 180),
-  "181-365d" = c(181, 365),
+  "1-90d" = c(1, 90),        # Aggregated: first 3 months
+  "91-180d" = c(91, 180),    # Aggregated: 3-6 months
+  "181-365d" = c(181, 365),  # Aggregated: 6-12 months
   "1-45d" = c(1, 45),
   "46-90d" = c(46, 90)
 )
@@ -157,6 +185,11 @@ for (period_name in names(time_periods)) {
     inner_join(baseline_cohort, by = "person_id") %>%
     filter(days_from_initiation >= start_day,
            days_from_initiation <= end_day) %>%
+    # Calculate wear time and MVPA for each day
+    mutate(
+      wear_time = sedentary_minutes + lightly_active_minutes + fairly_active_minutes + very_active_minutes,
+      MVPA = fairly_active_minutes + very_active_minutes
+    ) %>%
     group_by(person_id) %>%
     filter(n() >= 3) %>%  # Minimum 3 days
     summarize(
@@ -165,7 +198,16 @@ for (period_name in names(time_periods)) {
       period_light = mean(lightly_active_minutes, na.rm = TRUE),
       period_fairly = mean(fairly_active_minutes, na.rm = TRUE),
       period_very = mean(very_active_minutes, na.rm = TRUE),
+      period_MVPA = mean(MVPA, na.rm = TRUE),
       period_calories = mean(activity_calories, na.rm = TRUE),
+      period_wear_time = mean(wear_time, na.rm = TRUE),
+      # Calculate % of wear time
+      period_sedentary_pct = mean(100 * sedentary_minutes / wear_time, na.rm = TRUE),
+      period_light_pct = mean(100 * lightly_active_minutes / wear_time, na.rm = TRUE),
+      period_MVPA_pct = mean(100 * MVPA / wear_time, na.rm = TRUE),
+      # MVPA diagnostics
+      n_days_with_MVPA = sum(MVPA > 0, na.rm = TRUE),
+      pct_days_with_MVPA = 100 * sum(MVPA > 0, na.rm = TRUE) / n(),
       n_period_days = n(),
       .groups = "drop"
     )
