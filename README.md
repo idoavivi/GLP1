@@ -87,16 +87,45 @@ Implements exact specifications for baseline window selection and follow-up anal
 - **Activity Measurement**: Average activity with minimum 3 days of data within ±15 day window
 - **Active Treatment**: Only includes patients with GLP-1 prescription within 90 days of timepoint
 
-### 7. **period_analysis.R** - Period-Based Analysis with Random Effects Models
-Alternative analysis approach using time periods instead of specific timepoints:
-- **Time Periods**: 1-30d, 31-60d, 61-90d, 91-180d, 181-365d, plus 1-45d, 46-90d post-initiation
-- **Weight**: Lowest weight recorded during each period
-- **Activity**: Average activity metrics during period (minimum 3 days required)
-- **Statistical Method**: Random effects models (lme4/lmerTest) to account for patient dropout
-- **Output**: Comprehensive table with baseline and all periods including mean ± SD for all metrics
-- **Temporal Trends**: P-values from mixed models showing changes over time
+### 7. **period_analysis.R** - Period-Based Analysis with Period-Specific Baselines and Paired T-Tests
+Alternative analysis approach using time periods with rigorous paired comparison methodology:
+- **Time Periods**: 1-30d, 31-60d, 61-90d, 1-90d, 91-180d, 181-365d, 1-45d, 46-90d post-initiation
+- **Period-Specific Baselines**: Each period has its own baseline calculated ONLY from patients who appear in that period, ensuring proper paired comparison (N_baseline = N_period = N_paired)
+- **Baseline Window**: Days -180 to 0 before GLP-1 initiation
+  - **Weight**: HIGHEST weight in baseline window (true starting weight)
+  - **Activity**: AVERAGE activity metrics (minimum 3 days required)
+  - **Wear Time Adjustment**: Calculates percentage of wear time for sedentary, light, and MVPA
+  - **MVPA Diagnostics**: Tracks days with MVPA > 0 to identify zero-inflation
+- **Follow-up Measurement**:
+  - **Weight**: LOWEST weight during period
+  - **Activity**: AVERAGE activity metrics (minimum 3 days required)
+  - **Active Treatment**: Only includes patients with ≥2 prescription fills AND prescription within 90 days of period midpoint
+- **Statistical Methods**:
+  - **Paired t-tests**: Each period vs its specific baseline (same patients)
+  - **Random effects models**: Linear trends across all periods (lme4/lmerTest)
+- **Output**: Comprehensive table with baseline values, period values, changes (Δ), and p-values for ALL metrics including weight
+- **HTML Output**: Formatted HTML table for easy viewing
 
-### 8. **period_visualizations.R** - Period Analysis Figures
+### 8. **sensitivity_analysis.R** - Stratification by Weight Loss and Step Change
+Sensitivity analyses to explore heterogeneity in treatment response:
+
+**Analysis 1 - Activity Changes by Weight Loss Category**:
+- Stratifies patients by weight loss magnitude: < 5%, 5-10%, > 10% loss
+- Alternative categorization: < 7.5% vs ≥ 7.5% loss
+- Compares step changes and calorie changes across weight loss groups
+- ANOVA and t-tests to test for significant differences
+- Answers: Do patients who lose more weight also increase activity more?
+
+**Analysis 2 - Weight Changes by Step Change Category**:
+- Stratifies patients by step change: Decrease > 5%, No change (-5% to +5%), Increase > 5%
+- Compares weight changes across activity behavior groups
+- ANOVA with post-hoc Tukey HSD tests
+- Answers: Do patients who increase steps lose more weight?
+
+**Target Periods**: Analyzes three key aggregated periods (1-90d, 91-180d, 181-365d)
+**Output**: CSV files for each analysis and period, plus comprehensive RData file
+
+### 9. **period_visualizations.R** - Period Analysis Figures
 Creates publication-quality visualizations for the period-based analysis:
 - **Figure 1**: Weight and steps trajectories across periods with error bars
 - **Figure 2**: Activity composition stacked bar chart (sedentary/light/fairly/very active)
@@ -212,19 +241,31 @@ This approach:
 17. **statistical_comparisons_detailed.csv**: Detailed statistical results
 18. **key_findings_summary.csv**: Brief summary of key findings
 
-### Period Analysis Outputs
-19. **period_analysis_results.RData**: Complete period-based analysis results
-20. **period_summary_table.csv**: Summary table with baseline and all periods (mean ± SD)
-21. **period_individual_data.csv**: Patient-level data for each time period
-22. **period_model_results.csv**: Random effects model coefficients and p-values
-23. **period_detailed_stats.csv**: Detailed statistics for each period
+### Period Analysis Outputs (with Period-Specific Baselines)
+19. **period_analysis_results.RData**: Complete period-based analysis results with period-specific baselines
+20. **period_analysis_comprehensive_table.csv**: Main publication table with baseline, period values, Δ, and p-values
+21. **period_analysis_comprehensive_table.html**: Formatted HTML version of comprehensive table (easy viewing)
+22. **period_analysis_descriptive.csv**: Descriptive statistics only (Mean ± SD)
+23. **period_analysis_changes.csv**: Changes from baseline only
+24. **period_analysis_paired_tests.csv**: Detailed paired t-test results
+25. **period_analysis_summary_with_diagnostics.csv**: Wear time percentages and MVPA diagnostics
+26. **period_analysis_raw_stats.csv**: Raw statistics for all periods
+27. **period_analysis_model_pvalues.csv**: Random effects model p-values (linear trend)
+28. **period_analysis_model_coefficients.csv**: Full random effects model results
+29. **period_analysis_long_data.csv**: Long format data for custom analyses
+
+### Sensitivity Analysis Outputs
+30. **sensitivity_weight_loss_3cat_[period].csv**: Activity changes by 3-category weight loss (< 5%, 5-10%, > 10%)
+31. **sensitivity_weight_loss_2cat_[period].csv**: Activity changes by 2-category weight loss (< 7.5%, ≥ 7.5%)
+32. **sensitivity_step_change_[period].csv**: Weight changes by step change category
+33. **sensitivity_analysis_results.RData**: Complete sensitivity analysis results and patient-level data
 
 ### Period Visualization Outputs
-24. **period_figure1_trajectories.png**: Weight and steps trajectories with error bars
-25. **period_figure2_activity_composition.png**: Stacked bar chart of activity intensity
-26. **period_figure3_change_from_baseline.png**: 4-panel change analysis
-27. **period_figure4_sample_sizes.png**: Sample sizes and retention rates
-28. **period_figure5_percent_change.png**: Percent change heatmap
+34. **period_figure1_trajectories.png**: Weight and steps trajectories with error bars
+35. **period_figure2_activity_composition.png**: Stacked bar chart of activity intensity
+36. **period_figure3_change_from_baseline.png**: 4-panel change analysis
+37. **period_figure4_sample_sizes.png**: Sample sizes and retention rates
+38. **period_figure5_percent_change.png**: Percent change heatmap
 
 ## Data Structure
 
@@ -284,15 +325,25 @@ source("windowed_visualizations.R")
 # This creates: PNG figures in current directory
 ```
 
-#### Step 5 (Alternative): Period-Based Analysis with Random Effects
+#### Step 5 (Alternative): Period-Based Analysis with Period-Specific Baselines
 ```r
-# Run period-based analysis (alternative to timepoint-based)
+# Run period-based analysis with paired t-tests (alternative to timepoint-based)
 source("period_analysis.R")
-# This creates: period_analysis_results.RData and CSV files
-# Uses random effects models to account for dropout
+# This creates: period_analysis_results.RData, comprehensive_table.csv/html, and diagnostic CSVs
+# Uses period-specific baselines for proper paired comparison
+# Includes paired t-tests AND random effects models
 ```
 
-#### Step 6: Period Analysis Visualizations
+#### Step 6: Sensitivity Analyses - Stratification by Weight Loss and Step Change
+```r
+# Run sensitivity analyses (requires period_analysis_results.RData from Step 5)
+source("sensitivity_analysis.R")
+# This creates: sensitivity_*.csv files for each analysis and period
+# Analysis 1: Activity changes by weight loss category
+# Analysis 2: Weight changes by step change category
+```
+
+#### Step 7: Period Analysis Visualizations
 ```r
 # Generate figures for period-based analysis (run after Step 5)
 source("period_visualizations.R")
@@ -363,10 +414,17 @@ Consider stratifying by:
 - Comorbidities (diabetes, hypertension, etc.)
 - Medication type (semaglutide vs. tirzepatide)
 
-### 6. Sensitivity Analyses
+### 6. Sensitivity Analyses ✓ IMPLEMENTED
+**Now available via sensitivity_analysis.R**:
+- **Weight loss stratification**: Activity changes by weight loss magnitude (< 5%, 5-10%, > 10% or < 7.5%, ≥ 7.5%)
+- **Step change stratification**: Weight changes by activity behavior (decrease > 5%, no change, increase > 5%)
+- **Statistical testing**: ANOVA and t-tests to compare groups
+
+**Additional sensitivity analyses to consider**:
 - Varying time windows (e.g., 3, 6, 12 months before/after)
 - Excluding patients with minimal follow-up
 - Different activity thresholds
+- Varying minimum Fitbit wear time requirements
 
 ## Example Analysis Code
 
@@ -442,5 +500,12 @@ ggplot(activity_with_glp1, aes(x = days_from_initiation, y = steps, group = pers
 For questions about this analysis, please refer to the All of Us Research Program documentation.
 
 ## Version History
-- v1.0 (2024): Initial data processing pipeline
-- v2.0 (2024): Added windowed analysis with baseline selection, follow-up timepoints, and nadir analysis
+- **v1.0** (2024): Initial data processing pipeline
+- **v2.0** (2024): Added windowed analysis with baseline selection, follow-up timepoints, and nadir analysis
+- **v3.0** (2025): Major update to period-based analysis and sensitivity analyses:
+  - Implemented period-specific baselines for proper paired comparisons
+  - Fixed weight p-values in comprehensive table
+  - Added wear time adjustments and MVPA diagnostics
+  - Created sensitivity_analysis.R for weight loss and step change stratification
+  - HTML output for comprehensive tables
+  - Enhanced documentation and interpretation guides
