@@ -499,26 +499,209 @@ change_table <- changes_from_baseline %>%
          `Fairly Δ`, `Very Δ`, `Calories Δ`)
 
 # =============================================================================
+# PAIRED T-TESTS: Each Period vs Baseline
+# =============================================================================
+
+cat("### CALCULATING PAIRED T-TESTS ###\n\n")
+
+# Get baseline data for each patient
+baseline_data <- all_data_long %>%
+  filter(period == "Baseline") %>%
+  select(person_id, baseline_weight = weight, baseline_steps = steps,
+         baseline_sedentary = sedentary, baseline_light = light,
+         baseline_fairly = fairly, baseline_very = very,
+         baseline_calories = calories)
+
+# Calculate paired t-tests for each period
+period_names <- unique(all_data_long$period)
+period_names <- period_names[period_names != "Baseline"]
+
+paired_test_results <- list()
+
+for (pname in period_names) {
+  # Get period data
+  period_data <- all_data_long %>%
+    filter(period == pname) %>%
+    select(person_id, period_weight = weight, period_steps = steps,
+           period_sedentary = sedentary, period_light = light,
+           period_fairly = fairly, period_very = very,
+           period_calories = calories)
+
+  # Merge with baseline (only patients in both)
+  merged <- baseline_data %>%
+    inner_join(period_data, by = "person_id") %>%
+    filter(!is.na(baseline_weight), !is.na(period_weight))
+
+  if (nrow(merged) < 10) {
+    next  # Skip if too few paired observations
+  }
+
+  # Run paired t-tests
+  tests <- list(
+    weight = t.test(merged$period_weight, merged$baseline_weight, paired = TRUE),
+    steps = t.test(merged$period_steps, merged$baseline_steps, paired = TRUE),
+    sedentary = t.test(merged$period_sedentary, merged$baseline_sedentary, paired = TRUE),
+    light = t.test(merged$period_light, merged$baseline_light, paired = TRUE),
+    fairly = t.test(merged$period_fairly, merged$baseline_fairly, paired = TRUE),
+    very = t.test(merged$period_very, merged$baseline_very, paired = TRUE),
+    calories = t.test(merged$period_calories, merged$baseline_calories, paired = TRUE)
+  )
+
+  paired_test_results[[pname]] <- tibble(
+    Period = pname,
+    N_paired = nrow(merged),
+    weight_p = tests$weight$p.value,
+    steps_p = tests$steps$p.value,
+    sedentary_p = tests$sedentary$p.value,
+    light_p = tests$light$p.value,
+    fairly_p = tests$fairly$p.value,
+    very_p = tests$very$p.value,
+    calories_p = tests$calories$p.value
+  )
+
+  cat(sprintf("  %s: N=%d pairs\n", pname, nrow(merged)))
+}
+
+paired_test_table <- bind_rows(paired_test_results)
+
+# Create comprehensive publication table with stats
+comprehensive_table <- publication_table %>%
+  left_join(
+    paired_test_table %>% select(Period, N_paired, weight_p, steps_p, sedentary_p,
+                                  light_p, fairly_p, very_p, calories_p),
+    by = "Period"
+  ) %>%
+  left_join(
+    changes_from_baseline %>% select(period, weight_change, weight_pct,
+                                     steps_change, steps_pct),
+    by = c("Period" = "period")
+  ) %>%
+  mutate(
+    `Weight Δ` = ifelse(!is.na(weight_change),
+                        sprintf("%.1f (%.1f%%)", weight_change, weight_pct),
+                        "—"),
+    `Weight p` = ifelse(!is.na(weight_p), sapply(weight_p, format_pvalue), "—"),
+    `Steps Δ` = ifelse(!is.na(steps_change),
+                       sprintf("%.0f (%.1f%%)", steps_change, steps_pct),
+                       "—"),
+    `Steps p` = ifelse(!is.na(steps_p), sapply(steps_p, format_pvalue), "—"),
+    `Sed p` = ifelse(!is.na(sedentary_p), sapply(sedentary_p, format_pvalue), "—"),
+    `Light p` = ifelse(!is.na(light_p), sapply(light_p, format_pvalue), "—"),
+    `Fairly p` = ifelse(!is.na(fairly_p), sapply(fairly_p, format_pvalue), "—"),
+    `Very p` = ifelse(!is.na(very_p), sapply(very_p, format_pvalue), "—"),
+    `Cal p` = ifelse(!is.na(calories_p), sapply(calories_p, format_pvalue), "—")
+  ) %>%
+  select(Period, N, `Weight (kg)`, `Weight Δ`, `Weight p`,
+         `Steps (n/day)`, `Steps Δ`, `Steps p`,
+         `Sedentary (min)`, `Sed p`,
+         `Light Active (min)`, `Light p`,
+         `Fairly Active (min)`, `Fairly p`,
+         `Very Active (min)`, `Very p`,
+         `Activity Cal (kcal)`, `Cal p`)
+
+cat("\n")
+
+# =============================================================================
+# CREATE PERIOD SUMMARY TABLE WITH WEAR TIME & MVPA DIAGNOSTICS
+# =============================================================================
+
+cat("### CREATING PERIOD SUMMARY WITH DIAGNOSTICS ###\n\n")
+
+# Combine all period data
+period_summary_table <- bind_rows(period_data_list) %>%
+  group_by(period) %>%
+  summarize(
+    n_patients = n(),
+    mean_weight = mean(period_weight, na.rm = TRUE),
+    sd_weight = sd(period_weight, na.rm = TRUE),
+    mean_steps = mean(period_steps, na.rm = TRUE),
+    sd_steps = sd(period_steps, na.rm = TRUE),
+    mean_sedentary_min = mean(period_sedentary, na.rm = TRUE),
+    sd_sedentary_min = sd(period_sedentary, na.rm = TRUE),
+    mean_light_min = mean(period_light, na.rm = TRUE),
+    sd_light_min = sd(period_light, na.rm = TRUE),
+    mean_fairly_min = mean(period_fairly, na.rm = TRUE),
+    sd_fairly_min = sd(period_fairly, na.rm = TRUE),
+    mean_very_min = mean(period_very, na.rm = TRUE),
+    sd_very_min = sd(period_very, na.rm = TRUE),
+    mean_MVPA = mean(period_MVPA, na.rm = TRUE),
+    sd_MVPA = sd(period_MVPA, na.rm = TRUE),
+    mean_wear_time = mean(period_wear_time, na.rm = TRUE),
+    sd_wear_time = sd(period_wear_time, na.rm = TRUE),
+    mean_sedentary_pct = mean(period_sedentary_pct, na.rm = TRUE),
+    sd_sedentary_pct = sd(period_sedentary_pct, na.rm = TRUE),
+    mean_light_pct = mean(period_light_pct, na.rm = TRUE),
+    sd_light_pct = sd(period_light_pct, na.rm = TRUE),
+    mean_MVPA_pct = mean(period_MVPA_pct, na.rm = TRUE),
+    sd_MVPA_pct = sd(period_MVPA_pct, na.rm = TRUE),
+    mean_days_with_MVPA = mean(n_days_with_MVPA, na.rm = TRUE),
+    mean_pct_days_with_MVPA = mean(pct_days_with_MVPA, na.rm = TRUE),
+    .groups = "drop"
+  )
+
+# Add baseline to the summary
+baseline_summary <- baseline_activity_final %>%
+  inner_join(baseline_weight_final, by = "person_id") %>%
+  summarize(
+    period = "Baseline",
+    n_patients = n(),
+    mean_weight = mean(baseline_weight, na.rm = TRUE),
+    sd_weight = sd(baseline_weight, na.rm = TRUE),
+    mean_steps = mean(baseline_steps, na.rm = TRUE),
+    sd_steps = sd(baseline_steps, na.rm = TRUE),
+    mean_sedentary_min = mean(baseline_sedentary, na.rm = TRUE),
+    sd_sedentary_min = sd(baseline_sedentary, na.rm = TRUE),
+    mean_light_min = mean(baseline_light, na.rm = TRUE),
+    sd_light_min = sd(baseline_light, na.rm = TRUE),
+    mean_fairly_min = mean(baseline_fairly, na.rm = TRUE),
+    sd_fairly_min = sd(baseline_fairly, na.rm = TRUE),
+    mean_very_min = mean(baseline_very, na.rm = TRUE),
+    sd_very_min = sd(baseline_very, na.rm = TRUE),
+    mean_MVPA = mean(baseline_MVPA, na.rm = TRUE),
+    sd_MVPA = sd(baseline_MVPA, na.rm = TRUE),
+    mean_wear_time = mean(baseline_wear_time, na.rm = TRUE),
+    sd_wear_time = sd(baseline_wear_time, na.rm = TRUE),
+    mean_sedentary_pct = mean(baseline_sedentary_pct, na.rm = TRUE),
+    sd_sedentary_pct = sd(baseline_sedentary_pct, na.rm = TRUE),
+    mean_light_pct = mean(baseline_light_pct, na.rm = TRUE),
+    sd_light_pct = sd(baseline_light_pct, na.rm = TRUE),
+    mean_MVPA_pct = mean(baseline_MVPA_pct, na.rm = TRUE),
+    sd_MVPA_pct = sd(baseline_MVPA_pct, na.rm = TRUE),
+    mean_days_with_MVPA = NA_real_,
+    mean_pct_days_with_MVPA = NA_real_
+  )
+
+period_summary_table <- bind_rows(baseline_summary, period_summary_table)
+
+cat("\n")
+
+# =============================================================================
 # DISPLAY RESULTS
 # =============================================================================
 
 cat("=============================================================================\n")
-cat("PERIOD-BASED ANALYSIS: DESCRIPTIVE STATISTICS\n")
+cat("COMPREHENSIVE PUBLICATION TABLE\n")
 cat("=============================================================================\n\n")
-cat(sprintf("Baseline: Days %d to %d\n", baseline_start, baseline_end))
-cat("Follow-up Periods: 1-30d, 31-60d, 61-90d, 91-180d, 181-365d, 1-45d, 46-90d\n")
+cat(sprintf("Baseline: Days %d to %d (highest weight, average activity)\n", baseline_start, baseline_end))
+cat("Follow-up Periods: Multiple periods with active treatment (≥2 fills)\n")
 cat("Weight: Lowest in period | Activity: Average in period (≥3 days)\n")
-cat("Statistical Method: Random Effects Models (period_num predictor)\n\n")
+cat("Statistical Tests: Paired t-tests (each period vs baseline, same patients)\n")
 cat("*** p<0.001, ** p<0.01, * p<0.05\n\n")
 
-cat("--- Descriptive Statistics (Mean ± SD) ---\n\n")
-print(publication_table, n = Inf)
+print(comprehensive_table, n = Inf, width = Inf)
 
-cat("\n--- Changes from Baseline ---\n\n")
-print(change_table, n = Inf)
+cat("\n=============================================================================\n")
+cat("INTERPRETATION GUIDE\n")
+cat("=============================================================================\n")
+cat("• N: Number of patients with data in this period\n")
+cat("• Mean ± SD: Descriptive statistics for each metric\n")
+cat("• Δ: Change from baseline (absolute and percent for weight/steps)\n")
+cat("• p: P-value from paired t-test comparing period to baseline\n")
+cat("• Only patients with BOTH baseline and period data are included in t-tests\n")
+cat("=============================================================================\n\n")
 
 if (use_mixed_models) {
-  cat("\n--- Random Effects Model P-values ---\n\n")
+  cat("\n--- Random Effects Model P-values (Linear Trend) ---\n\n")
   model_summary <- model_pvalues %>%
     mutate(
       Metric = case_when(
@@ -535,6 +718,8 @@ if (use_mixed_models) {
     select(Metric, `P-value`)
 
   print(model_summary, n = Inf)
+  cat("\nNote: These p-values test for linear trend across ALL periods (period_num effect)\n")
+  cat("      Paired t-test p-values in the table above test each period vs baseline\n\n")
 }
 
 # =============================================================================
@@ -543,13 +728,107 @@ if (use_mixed_models) {
 
 cat("\n=== SAVING RESULTS ===\n\n")
 
-# Save tables
+# Save main comprehensive table
+write_csv(comprehensive_table, "period_analysis_comprehensive_table.csv")
+cat("  ✓ period_analysis_comprehensive_table.csv (publication table with stats)\n")
+
+# Save as HTML for better readability
+if (require(knitr, quietly = TRUE) && require(kableExtra, quietly = TRUE)) {
+  html_table <- comprehensive_table %>%
+    kable(format = "html", escape = FALSE, align = "c") %>%
+    kable_styling(
+      bootstrap_options = c("striped", "hover", "condensed", "responsive"),
+      full_width = FALSE,
+      position = "left",
+      font_size = 12
+    ) %>%
+    column_spec(1, bold = TRUE, width = "8em") %>%
+    column_spec(2, width = "4em") %>%
+    add_header_above(c(" " = 2, "Weight" = 3, "Steps" = 3, "Sedentary" = 2,
+                       "Light" = 2, "Fairly" = 2, "Very" = 2, "Calories" = 2)) %>%
+    footnote(
+      general = c(
+        "Baseline: Days -180 to 0 (highest weight, average activity)",
+        "Follow-up: Active treatment only (≥2 prescription fills)",
+        "Statistical Tests: Paired t-tests (each period vs baseline)",
+        "*** p<0.001, ** p<0.01, * p<0.05"
+      ),
+      general_title = "Notes:"
+    )
+
+  save_kable(html_table, "period_analysis_comprehensive_table.html")
+  cat("  ✓ period_analysis_comprehensive_table.html (formatted HTML table)\n")
+} else {
+  # Fallback: simple HTML table without kableExtra
+  html_output <- paste0(
+    "<!DOCTYPE html>\n<html>\n<head>\n",
+    "<style>\n",
+    "body { font-family: Arial, sans-serif; margin: 20px; }\n",
+    "h1 { color: #333; }\n",
+    "table { border-collapse: collapse; width: 100%; margin-top: 20px; }\n",
+    "th, td { border: 1px solid #ddd; padding: 8px; text-align: center; }\n",
+    "th { background-color: #4CAF50; color: white; }\n",
+    "tr:nth-child(even) { background-color: #f2f2f2; }\n",
+    "tr:hover { background-color: #ddd; }\n",
+    ".notes { margin-top: 20px; font-size: 0.9em; color: #666; }\n",
+    "</style>\n",
+    "</head>\n<body>\n",
+    "<h1>GLP-1 Period Analysis - Comprehensive Results</h1>\n",
+    "<p><strong>Baseline:</strong> Days -180 to 0 (highest weight, average activity)<br>\n",
+    "<strong>Follow-up:</strong> Active treatment only (≥2 prescription fills)<br>\n",
+    "<strong>Statistical Tests:</strong> Paired t-tests (each period vs baseline)</p>\n"
+  )
+
+  # Convert table to HTML
+  html_output <- paste0(html_output, "<table>\n<thead>\n<tr>\n")
+  for (col in names(comprehensive_table)) {
+    html_output <- paste0(html_output, "<th>", col, "</th>")
+  }
+  html_output <- paste0(html_output, "\n</tr>\n</thead>\n<tbody>\n")
+
+  for (i in 1:nrow(comprehensive_table)) {
+    html_output <- paste0(html_output, "<tr>\n")
+    for (col in names(comprehensive_table)) {
+      html_output <- paste0(html_output, "<td>", comprehensive_table[[col]][i], "</td>")
+    }
+    html_output <- paste0(html_output, "\n</tr>\n")
+  }
+
+  html_output <- paste0(
+    html_output,
+    "</tbody>\n</table>\n",
+    "<div class='notes'>\n",
+    "<p><strong>Notes:</strong><br>\n",
+    "*** p<0.001, ** p<0.01, * p<0.05<br>\n",
+    "Δ = Change from baseline<br>\n",
+    "p = P-value from paired t-test</p>\n",
+    "</div>\n",
+    "</body>\n</html>"
+  )
+
+  writeLines(html_output, "period_analysis_comprehensive_table.html")
+  cat("  ✓ period_analysis_comprehensive_table.html (simple HTML table)\n")
+}
+
+# Save detailed tables
 write_csv(publication_table, "period_analysis_descriptive.csv")
+cat("  ✓ period_analysis_descriptive.csv (descriptive statistics only)\n")
+
 write_csv(change_table, "period_analysis_changes.csv")
+cat("  ✓ period_analysis_changes.csv (changes from baseline)\n")
+
+write_csv(paired_test_table, "period_analysis_paired_tests.csv")
+cat("  ✓ period_analysis_paired_tests.csv (paired t-test results)\n")
+
+write_csv(period_summary_table, "period_analysis_summary_with_diagnostics.csv")
+cat("  ✓ period_analysis_summary_with_diagnostics.csv (wear time & MVPA diagnostics)\n")
+
 write_csv(summary_stats, "period_analysis_raw_stats.csv")
+cat("  ✓ period_analysis_raw_stats.csv (raw statistics)\n")
 
 if (use_mixed_models) {
   write_csv(model_pvalues, "period_analysis_model_pvalues.csv")
+  cat("  ✓ period_analysis_model_pvalues.csv (random effects p-values)\n")
 
   # Save model summaries
   model_summaries <- map(names(models), ~{
@@ -558,20 +837,30 @@ if (use_mixed_models) {
     bind_rows()
 
   write_csv(model_summaries, "period_analysis_model_coefficients.csv")
+  cat("  ✓ period_analysis_model_coefficients.csv (full model results)\n")
 }
 
 # Save long format data
 write_csv(all_data_long, "period_analysis_long_data.csv")
+cat("  ✓ period_analysis_long_data.csv (long format data for analysis)\n")
 
-cat("Files saved:\n")
-cat("  - period_analysis_descriptive.csv (main table)\n")
-cat("  - period_analysis_changes.csv (changes from baseline)\n")
-cat("  - period_analysis_raw_stats.csv (raw statistics)\n")
-if (use_mixed_models) {
-  cat("  - period_analysis_model_pvalues.csv (p-values from models)\n")
-  cat("  - period_analysis_model_coefficients.csv (full model results)\n")
-}
-cat("  - period_analysis_long_data.csv (long format data)\n\n")
+# Save all results to RData file
+save(
+  comprehensive_table,
+  publication_table,
+  change_table,
+  paired_test_table,
+  period_summary_table,
+  summary_stats,
+  all_data_long,
+  baseline_activity_final,
+  baseline_weight_final,
+  period_data_list,
+  file = "period_analysis_results.RData"
+)
+cat("  ✓ period_analysis_results.RData (all results for visualization)\n")
+
+cat("\nPRIMARY OUTPUT: period_analysis_comprehensive_table.csv / .html\n")
 
 cat("=============================================================================\n")
 cat("PERIOD ANALYSIS COMPLETE\n")
