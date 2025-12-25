@@ -133,6 +133,32 @@ Creates publication-quality visualizations for the period-based analysis:
 - **Figure 4**: Sample sizes and retention rates across periods
 - **Figure 5**: Percent change heatmap for all metrics
 
+### 10. **sensitivity_visualizations.R** - Sensitivity Analysis Figures
+Creates visualizations for stratification analyses:
+
+**Figure 1 - Activity by Weight Loss Category**:
+- Steps and calories at baseline vs follow-up
+- Automatically selects period with highest difference between weight loss groups
+- Two-panel plot showing those who lose more weight increase activity more
+
+**Figure 2 - Weight by Step Change Category (Period)**:
+- Weight at baseline vs follow-up by step change category
+- Selects period with highest weight difference
+- Shows those who increase steps lose more weight
+
+**Figure 3 - Weight by Step Change Category (Nadir)**:
+- Weight at baseline vs nadir (lowest weight achieved)
+- Same step change categorization
+- Demonstrates relationship to maximum weight loss
+
+**Figures 4 & 5 - Spaghetti Plots**:
+- Individual patient trajectories for weight and steps
+- Stratified by weight loss category
+- Samples up to 30 patients per group for clarity
+- Bold mean trajectory with SE ribbon
+
+All figures: 300 dpi, publication-ready formatting
+
 ## Windowed Analysis Methodology
 
 The windowed analysis provides a rigorous, time-based approach to assess activity changes:
@@ -267,6 +293,13 @@ This approach:
 37. **period_figure4_sample_sizes.png**: Sample sizes and retention rates
 38. **period_figure5_percent_change.png**: Percent change heatmap
 
+### Sensitivity Visualization Outputs
+39. **sensitivity_figure1_activity_by_weight_loss.png**: Steps and calories by weight loss category (2-panel)
+40. **sensitivity_figure2_weight_by_step_change.png**: Weight change by step change category
+41. **sensitivity_figure3_weight_by_step_change_nadir.png**: Weight change to nadir by step change category
+42. **sensitivity_figure4_spaghetti_weight_by_category.png**: Individual weight trajectories by weight loss category
+43. **sensitivity_figure5_spaghetti_steps_by_category.png**: Individual steps trajectories by weight loss category
+
 ## Data Structure
 
 ### Activity Data (activity_with_glp1)
@@ -349,6 +382,16 @@ source("sensitivity_analysis.R")
 source("period_visualizations.R")
 # This creates: period_figure*.png files
 # Requires period_analysis_results.RData
+```
+
+#### Step 8: Sensitivity Analysis Visualizations
+```r
+# Generate figures for sensitivity analyses (run after Step 6)
+source("sensitivity_visualizations.R")
+# This creates: sensitivity_figure*.png files
+# Requires both sensitivity_analysis_results.RData and period_analysis_results.RData
+# Automatically selects periods with highest between-group differences
+# Creates spaghetti plots showing individual trajectories
 ```
 
 #### Optional: Optimized Window Analysis
