@@ -1,488 +1,495 @@
 # =============================================================================
-# Sensitivity Analysis Visualizations
+# Sensitivity Analysis Visualizations - Optimized Version
 # =============================================================================
-# Creates publication-quality figures for weight loss and step change analyses
+# Creates publication-quality figures using optimized period timepoints
+# Shows trajectories across all timepoints: Baseline, 1-90d, 91-180d, 181-365d, Nadir
 # =============================================================================
 
 library(tidyverse)
 library(patchwork)
 
 cat("=============================================================================\n")
-cat("SENSITIVITY ANALYSIS VISUALIZATIONS\n")
+cat("SENSITIVITY ANALYSIS VISUALIZATIONS (OPTIMIZED TIMEPOINTS)\n")
 cat("=============================================================================\n\n")
 
-# Load sensitivity analysis results
-if (!file.exists("sensitivity_analysis_results.RData")) {
-  stop("ERROR: sensitivity_analysis_results.RData not found. Run sensitivity_analysis.R first.")
+# Load period analysis optimized results
+if (!file.exists("period_analysis_optimized_results.RData")) {
+  stop("ERROR: period_analysis_optimized_results.RData not found. Run period_analysis_optimized.R first.")
 }
 
-load("sensitivity_analysis_results.RData")
-
-cat("Loaded sensitivity_analysis_results.RData\n\n")
+load("period_analysis_optimized_results.RData")
+cat("Loaded period_analysis_optimized_results.RData\n\n")
 
 # =============================================================================
-# FIGURE 1: ACTIVITY BY WEIGHT LOSS CATEGORY (HIGHEST DIFFERENCE PERIOD)
+# PREPARE DATA: CREATE WEIGHT LOSS CATEGORIES BASED ON NADIR
 # =============================================================================
 
-cat("### CREATING FIGURE 1: Activity by Weight Loss Category ###\n\n")
+cat("### PREPARING DATA WITH WEIGHT LOSS CATEGORIES ###\n\n")
 
-# Find period with highest difference in steps between weight loss groups
-max_diff_period <- NULL
-max_diff_value <- 0
+# Get baseline data
+baseline_cohort <- baseline_data %>%
+  select(person_id, baseline_weight, baseline_steps, baseline_calories = baseline_calories)
 
-for (pname in names(weight_loss_results)) {
-  summary_3cat <- weight_loss_results[[pname]]$summary_3cat
-  if (nrow(summary_3cat) >= 2) {
-    diff <- max(summary_3cat$mean_steps_change) - min(summary_3cat$mean_steps_change)
-    if (diff > max_diff_value) {
-      max_diff_value <- diff
-      max_diff_period <- pname
-    }
-  }
-}
+# Get nadir data
+nadir_cohort <- nadir_data %>%
+  select(person_id, nadir_weight, nadir_steps, nadir_calories, days_to_nadir)
 
-cat(sprintf("Period with highest step difference: %s (difference: %.0f steps)\n\n",
-            max_diff_period, max_diff_value))
-
-# Get data for the selected period
-merged_data <- weight_loss_results[[max_diff_period]]$merged_data
-
-# Prepare data for plotting
-plot_data_weight <- merged_data %>%
+# Calculate weight loss categories based on baseline to nadir
+weight_loss_categories <- baseline_cohort %>%
+  inner_join(nadir_cohort, by = "person_id") %>%
   mutate(
-    weight_loss_cat = factor(weight_loss_cat3,
-                              levels = c("< 5% loss", "5-10% loss", "> 10% loss"))
+    weight_change = nadir_weight - baseline_weight,
+    weight_pct_change = 100 * weight_change / baseline_weight,
+    weight_loss_cat = case_when(
+      weight_pct_change > -5 ~ "< 5% loss",
+      weight_pct_change <= -5 & weight_pct_change > -10 ~ "5-10% loss",
+      weight_pct_change <= -10 ~ "> 10% loss"
+    )
   ) %>%
-  select(person_id, weight_loss_cat,
-         baseline_steps, period_steps = period_steps,
-         baseline_calories, period_calories = period_calories) %>%
-  pivot_longer(
-    cols = c(baseline_steps, period_steps, baseline_calories, period_calories),
-    names_to = "metric_time",
-    values_to = "value"
-  ) %>%
-  separate(metric_time, into = c("time", "metric"), sep = "_", extra = "merge") %>%
+  select(person_id, weight_loss_cat)
+
+cat(sprintf("Patients categorized by weight loss (baseline to nadir): %d\n", nrow(weight_loss_categories)))
+
+# Count by category
+cat("\nWeight loss category distribution:\n")
+print(table(weight_loss_categories$weight_loss_cat))
+cat("\n")
+
+# =============================================================================
+# CREATE LONG FORMAT DATA WITH ALL TIMEPOINTS
+# =============================================================================
+
+cat("### CREATING LONG FORMAT DATA ###\n\n")
+
+# Baseline
+baseline_long <- baseline_cohort %>%
   mutate(
-    time = factor(time, levels = c("baseline", "period")),
-    metric = factor(metric, levels = c("steps", "calories"))
+    timepoint = "Baseline",
+    timepoint_num = 0,
+    weight = baseline_weight,
+    steps = baseline_steps,
+    calories = baseline_calories
+  ) %>%
+  select(person_id, timepoint, timepoint_num, weight, steps, calories)
+
+# 1-90d
+period_1_90d <- period_data_list[["1-90d"]] %>%
+  select(person_id, period_weight, period_steps, period_calories) %>%
+  mutate(
+    timepoint = "1-90d",
+    timepoint_num = 1,
+    weight = period_weight,
+    steps = period_steps,
+    calories = period_calories
+  ) %>%
+  select(person_id, timepoint, timepoint_num, weight, steps, calories)
+
+# 91-180d
+period_91_180d <- period_data_list[["91-180d"]] %>%
+  select(person_id, period_weight, period_steps, period_calories) %>%
+  mutate(
+    timepoint = "91-180d",
+    timepoint_num = 2,
+    weight = period_weight,
+    steps = period_steps,
+    calories = period_calories
+  ) %>%
+  select(person_id, timepoint, timepoint_num, weight, steps, calories)
+
+# 181-365d
+period_181_365d <- period_data_list[["181-365d"]] %>%
+  select(person_id, period_weight, period_steps, period_calories) %>%
+  mutate(
+    timepoint = "181-365d",
+    timepoint_num = 3,
+    weight = period_weight,
+    steps = period_steps,
+    calories = period_calories
+  ) %>%
+  select(person_id, timepoint, timepoint_num, weight, steps, calories)
+
+# Nadir
+nadir_long <- nadir_cohort %>%
+  mutate(
+    timepoint = "Nadir",
+    timepoint_num = 4,
+    weight = nadir_weight,
+    steps = nadir_steps,
+    calories = nadir_calories
+  ) %>%
+  select(person_id, timepoint, timepoint_num, weight, steps, calories)
+
+# Combine all timepoints
+all_timepoints <- bind_rows(
+  baseline_long,
+  period_1_90d,
+  period_91_180d,
+  period_181_365d,
+  nadir_long
+) %>%
+  inner_join(weight_loss_categories, by = "person_id") %>%
+  mutate(
+    weight_loss_cat = factor(weight_loss_cat,
+                              levels = c("< 5% loss", "5-10% loss", "> 10% loss")),
+    timepoint = factor(timepoint,
+                       levels = c("Baseline", "1-90d", "91-180d", "181-365d", "Nadir"))
   )
+
+cat(sprintf("Total observations across all timepoints: %d\n\n", nrow(all_timepoints)))
+
+# =============================================================================
+# FIGURE 1: WEIGHT TRAJECTORIES BY WEIGHT LOSS CATEGORY
+# =============================================================================
+
+cat("### CREATING FIGURE 1: Weight Trajectories by Weight Loss Category ###\n\n")
 
 # Calculate summary statistics
-summary_data_weight <- plot_data_weight %>%
-  group_by(weight_loss_cat, time, metric) %>%
+weight_summary <- all_timepoints %>%
+  group_by(weight_loss_cat, timepoint, timepoint_num) %>%
   summarize(
-    mean_value = mean(value, na.rm = TRUE),
-    se_value = sd(value, na.rm = TRUE) / sqrt(n()),
-    .groups = "drop"
-  )
-
-# Plot 1A: Steps by weight loss category
-p1a <- ggplot(summary_data_weight %>% filter(metric == "steps"),
-              aes(x = time, y = mean_value, color = weight_loss_cat, group = weight_loss_cat)) +
-  geom_line(linewidth = 1.2) +
-  geom_point(size = 3) +
-  geom_errorbar(aes(ymin = mean_value - se_value, ymax = mean_value + se_value),
-                width = 0.1, linewidth = 0.8) +
-  scale_color_manual(
-    values = c("< 5% loss" = "#E74C3C",
-               "5-10% loss" = "#F39C12",
-               "> 10% loss" = "#27AE60")
-  ) +
-  labs(
-    title = "A. Daily Steps by Weight Loss Category",
-    subtitle = sprintf("Period: %s", max_diff_period),
-    x = "",
-    y = "Daily Steps (mean ± SE)",
-    color = "Weight Loss"
-  ) +
-  scale_x_discrete(labels = c("Baseline", "Follow-up")) +
-  theme_minimal(base_size = 12) +
-  theme(
-    legend.position = "bottom",
-    plot.title = element_text(face = "bold"),
-    panel.grid.minor = element_blank()
-  )
-
-# Plot 1B: Calories by weight loss category
-p1b <- ggplot(summary_data_weight %>% filter(metric == "calories"),
-              aes(x = time, y = mean_value, color = weight_loss_cat, group = weight_loss_cat)) +
-  geom_line(linewidth = 1.2) +
-  geom_point(size = 3) +
-  geom_errorbar(aes(ymin = mean_value - se_value, ymax = mean_value + se_value),
-                width = 0.1, linewidth = 0.8) +
-  scale_color_manual(
-    values = c("< 5% loss" = "#E74C3C",
-               "5-10% loss" = "#F39C12",
-               "> 10% loss" = "#27AE60")
-  ) +
-  labs(
-    title = "B. Activity Calories by Weight Loss Category",
-    subtitle = sprintf("Period: %s", max_diff_period),
-    x = "",
-    y = "Activity Calories (mean ± SE)",
-    color = "Weight Loss"
-  ) +
-  scale_x_discrete(labels = c("Baseline", "Follow-up")) +
-  theme_minimal(base_size = 12) +
-  theme(
-    legend.position = "bottom",
-    plot.title = element_text(face = "bold"),
-    panel.grid.minor = element_blank()
-  )
-
-# Combine plots
-fig1 <- p1a + p1b +
-  plot_layout(ncol = 2, guides = "collect") &
-  theme(legend.position = "bottom")
-
-ggsave("sensitivity_figure1_activity_by_weight_loss.png", fig1,
-       width = 12, height = 6, dpi = 300, bg = "white")
-
-cat("  ✓ sensitivity_figure1_activity_by_weight_loss.png\n\n")
-
-# =============================================================================
-# FIGURE 2: WEIGHT BY STEP CHANGE CATEGORY (HIGHEST DIFFERENCE PERIOD)
-# =============================================================================
-
-cat("### CREATING FIGURE 2: Weight by Step Change Category ###\n\n")
-
-# Find period with highest difference in weight change between step change groups
-max_diff_period_steps <- NULL
-max_diff_value_steps <- 0
-
-for (pname in names(step_change_results)) {
-  summary_step <- step_change_results[[pname]]$summary
-  if (nrow(summary_step) >= 2) {
-    diff <- max(summary_step$mean_weight_change) - min(summary_step$mean_weight_change)
-    if (abs(diff) > max_diff_value_steps) {
-      max_diff_value_steps <- abs(diff)
-      max_diff_period_steps <- pname
-    }
-  }
-}
-
-cat(sprintf("Period with highest weight difference: %s (difference: %.1f kg)\n\n",
-            max_diff_period_steps, max_diff_value_steps))
-
-# Get data for the selected period
-merged_data_steps <- step_change_results[[max_diff_period_steps]]$merged_data
-
-# Prepare data for plotting
-plot_data_steps <- merged_data_steps %>%
-  mutate(
-    step_change_cat = factor(step_change_cat,
-                              levels = c("Decrease > 5%", "No change (-5% to +5%)", "Increase > 5%"))
-  ) %>%
-  select(person_id, step_change_cat, baseline_weight, period_weight) %>%
-  pivot_longer(
-    cols = c(baseline_weight, period_weight),
-    names_to = "time",
-    values_to = "weight"
-  ) %>%
-  mutate(
-    time = factor(time, levels = c("baseline_weight", "period_weight"))
-  )
-
-# Calculate summary statistics
-summary_data_steps <- plot_data_steps %>%
-  group_by(step_change_cat, time) %>%
-  summarize(
+    n = n(),
     mean_weight = mean(weight, na.rm = TRUE),
     se_weight = sd(weight, na.rm = TRUE) / sqrt(n()),
     .groups = "drop"
   )
 
-# Plot 2: Weight by step change category
-fig2 <- ggplot(summary_data_steps,
-               aes(x = time, y = mean_weight, color = step_change_cat, group = step_change_cat)) +
+# Create plot
+fig1 <- ggplot(weight_summary,
+               aes(x = timepoint, y = mean_weight, color = weight_loss_cat, group = weight_loss_cat)) +
   geom_line(linewidth = 1.2) +
   geom_point(size = 3) +
   geom_errorbar(aes(ymin = mean_weight - se_weight, ymax = mean_weight + se_weight),
-                width = 0.1, linewidth = 0.8) +
+                width = 0.2, linewidth = 0.8) +
+  geom_text(aes(label = sprintf("n=%d", n)),
+            vjust = -1.5, size = 3, show.legend = FALSE) +
   scale_color_manual(
-    values = c("Decrease > 5%" = "#E74C3C",
-               "No change (-5% to +5%)" = "#95A5A6",
-               "Increase > 5%" = "#3498DB")
+    values = c("< 5% loss" = "#E74C3C",
+               "5-10% loss" = "#F39C12",
+               "> 10% loss" = "#27AE60"),
+    name = "Weight Loss Category\n(Baseline to Nadir)"
   ) +
   labs(
-    title = "Weight Change by Step Change Category",
-    subtitle = sprintf("Period: %s", max_diff_period_steps),
-    x = "",
-    y = "Weight (kg, mean ± SE)",
-    color = "Step Change"
+    title = "Weight Trajectories by Weight Loss Category",
+    subtitle = "Patients categorized by total weight loss from baseline to nadir",
+    x = "Timepoint",
+    y = "Weight (kg, mean ± SE)"
   ) +
-  scale_x_discrete(labels = c("Baseline", "Follow-up")) +
   theme_minimal(base_size = 14) +
   theme(
     legend.position = "bottom",
     plot.title = element_text(face = "bold", size = 16),
-    panel.grid.minor = element_blank()
+    panel.grid.minor = element_blank(),
+    axis.text.x = element_text(angle = 0, hjust = 0.5)
   )
 
-ggsave("sensitivity_figure2_weight_by_step_change.png", fig2,
-       width = 8, height = 6, dpi = 300, bg = "white")
+ggsave("sensitivity_figure1_weight_trajectories_by_category.png", fig1,
+       width = 10, height = 7, dpi = 300, bg = "white")
 
-cat("  ✓ sensitivity_figure2_weight_by_step_change.png\n\n")
-
-# =============================================================================
-# FIGURE 3: WEIGHT BY STEP CHANGE CATEGORY - NADIR VERSION
-# =============================================================================
-
-cat("### CREATING FIGURE 3: Weight by Step Change Category (Baseline to Nadir) ###\n\n")
-
-# Load period analysis results for nadir data
-if (!file.exists("period_analysis_results.RData")) {
-  cat("WARNING: period_analysis_results.RData not found. Skipping nadir analysis.\n\n")
-} else {
-  load("period_analysis_results.RData")
-
-  # Get baseline data from all_data_long
-  baseline_data_all <- all_data_long %>%
-    filter(period == "Baseline") %>%
-    select(person_id, baseline_weight = weight, baseline_steps = steps)
-
-  # Get all period data and find nadir for each patient
-  nadir_data <- all_data_long %>%
-    filter(period != "Baseline") %>%
-    select(person_id, period, weight, steps) %>%
-    filter(!is.na(weight)) %>%
-    group_by(person_id) %>%
-    slice_min(weight, n = 1, with_ties = FALSE) %>%
-    ungroup() %>%
-    rename(nadir_weight = weight, nadir_steps = steps) %>%
-    select(person_id, nadir_weight)
-
-  # Merge with baseline and calculate step change to nadir
-  nadir_analysis <- baseline_data_all %>%
-    inner_join(nadir_data, by = "person_id") %>%
-    filter(!is.na(baseline_weight), !is.na(nadir_weight),
-           !is.na(baseline_steps)) %>%
-    mutate(
-      weight_change = nadir_weight - baseline_weight,
-      steps_pct_change = 100 * (baseline_steps - baseline_steps) / baseline_steps  # Will calculate actual from period data
-    )
-
-  # Get average steps for each patient across all periods
-  avg_period_steps <- all_data_long %>%
-    filter(period != "Baseline") %>%
-    group_by(person_id) %>%
-    summarize(avg_period_steps = mean(steps, na.rm = TRUE), .groups = "drop")
-
-  nadir_analysis <- nadir_analysis %>%
-    left_join(avg_period_steps, by = "person_id") %>%
-    mutate(
-      steps_pct_change = 100 * (avg_period_steps - baseline_steps) / baseline_steps,
-      step_change_cat = case_when(
-        steps_pct_change < -5 ~ "Decrease > 5%",
-        steps_pct_change >= -5 & steps_pct_change <= 5 ~ "No change (-5% to +5%)",
-        steps_pct_change > 5 ~ "Increase > 5%"
-      )
-    ) %>%
-    filter(!is.na(step_change_cat))
-
-  # Prepare data for plotting
-  plot_data_nadir <- nadir_analysis %>%
-    mutate(
-      step_change_cat = factor(step_change_cat,
-                                levels = c("Decrease > 5%", "No change (-5% to +5%)", "Increase > 5%"))
-    ) %>%
-    select(person_id, step_change_cat, baseline_weight, nadir_weight) %>%
-    pivot_longer(
-      cols = c(baseline_weight, nadir_weight),
-      names_to = "time",
-      values_to = "weight"
-    ) %>%
-    mutate(
-      time = factor(time, levels = c("baseline_weight", "nadir_weight"))
-    )
-
-  # Calculate summary statistics
-  summary_data_nadir <- plot_data_nadir %>%
-    group_by(step_change_cat, time) %>%
-    summarize(
-      mean_weight = mean(weight, na.rm = TRUE),
-      se_weight = sd(weight, na.rm = TRUE) / sqrt(n()),
-      n = n(),
-      .groups = "drop"
-    )
-
-  # Plot 3: Weight by step change category (nadir)
-  fig3 <- ggplot(summary_data_nadir,
-                 aes(x = time, y = mean_weight, color = step_change_cat, group = step_change_cat)) +
-    geom_line(linewidth = 1.2) +
-    geom_point(size = 3) +
-    geom_errorbar(aes(ymin = mean_weight - se_weight, ymax = mean_weight + se_weight),
-                  width = 0.1, linewidth = 0.8) +
-    geom_text(aes(label = sprintf("n=%d", n)),
-              vjust = -1.5, size = 3, show.legend = FALSE) +
-    scale_color_manual(
-      values = c("Decrease > 5%" = "#E74C3C",
-                 "No change (-5% to +5%)" = "#95A5A6",
-                 "Increase > 5%" = "#3498DB")
-    ) +
-    labs(
-      title = "Weight Change by Step Change Category",
-      subtitle = "Baseline to Nadir Weight",
-      x = "",
-      y = "Weight (kg, mean ± SE)",
-      color = "Step Change"
-    ) +
-    scale_x_discrete(labels = c("Baseline", "Nadir")) +
-    theme_minimal(base_size = 14) +
-    theme(
-      legend.position = "bottom",
-      plot.title = element_text(face = "bold", size = 16),
-      panel.grid.minor = element_blank()
-    )
-
-  ggsave("sensitivity_figure3_weight_by_step_change_nadir.png", fig3,
-         width = 8, height = 6, dpi = 300, bg = "white")
-
-  cat("  ✓ sensitivity_figure3_weight_by_step_change_nadir.png\n\n")
-}
+cat("  ✓ sensitivity_figure1_weight_trajectories_by_category.png\n\n")
 
 # =============================================================================
-# FIGURE 4: SPAGHETTI PLOTS - WEIGHT TRAJECTORIES BY CATEGORY
+# FIGURE 2: STEPS TRAJECTORIES BY WEIGHT LOSS CATEGORY
 # =============================================================================
 
-cat("### CREATING FIGURE 4: Spaghetti Plots - Weight Trajectories ###\n\n")
+cat("### CREATING FIGURE 2: Steps Trajectories by Weight Loss Category ###\n\n")
 
-if (exists("all_data_long")) {
-  # Get weight loss categories for the best period
-  best_period_data <- weight_loss_results[[max_diff_period]]$merged_data %>%
-    select(person_id, weight_loss_cat = weight_loss_cat3)
+# Calculate summary statistics
+steps_summary <- all_timepoints %>%
+  group_by(weight_loss_cat, timepoint, timepoint_num) %>%
+  summarize(
+    n = n(),
+    mean_steps = mean(steps, na.rm = TRUE),
+    se_steps = sd(steps, na.rm = TRUE) / sqrt(n()),
+    .groups = "drop"
+  )
 
-  # Get all period data with weight
-  weight_trajectory_data <- all_data_long %>%
-    select(person_id, period, period_num, weight) %>%
-    filter(!is.na(weight)) %>%
-    inner_join(best_period_data, by = "person_id") %>%
-    mutate(
-      weight_loss_cat = factor(weight_loss_cat,
-                                levels = c("< 5% loss", "5-10% loss", "> 10% loss"))
-    )
+# Create plot
+fig2 <- ggplot(steps_summary,
+               aes(x = timepoint, y = mean_steps, color = weight_loss_cat, group = weight_loss_cat)) +
+  geom_line(linewidth = 1.2) +
+  geom_point(size = 3) +
+  geom_errorbar(aes(ymin = mean_steps - se_steps, ymax = mean_steps + se_steps),
+                width = 0.2, linewidth = 0.8) +
+  geom_text(aes(label = sprintf("n=%d", n)),
+            vjust = -1.5, size = 3, show.legend = FALSE) +
+  scale_color_manual(
+    values = c("< 5% loss" = "#E74C3C",
+               "5-10% loss" = "#F39C12",
+               "> 10% loss" = "#27AE60"),
+    name = "Weight Loss Category\n(Baseline to Nadir)"
+  ) +
+  labs(
+    title = "Steps Trajectories by Weight Loss Category",
+    subtitle = "Patients categorized by total weight loss from baseline to nadir",
+    x = "Timepoint",
+    y = "Daily Steps (mean ± SE)"
+  ) +
+  theme_minimal(base_size = 14) +
+  theme(
+    legend.position = "bottom",
+    plot.title = element_text(face = "bold", size = 16),
+    panel.grid.minor = element_blank(),
+    axis.text.x = element_text(angle = 0, hjust = 0.5)
+  )
 
-  # Calculate mean trajectories
-  mean_trajectories <- weight_trajectory_data %>%
-    group_by(weight_loss_cat, period, period_num) %>%
-    summarize(
-      mean_weight = mean(weight, na.rm = TRUE),
-      se_weight = sd(weight, na.rm = TRUE) / sqrt(n()),
-      .groups = "drop"
-    )
+ggsave("sensitivity_figure2_steps_trajectories_by_category.png", fig2,
+       width = 10, height = 7, dpi = 300, bg = "white")
 
-  # Sample patients for clearer visualization (max 30 per category)
-  set.seed(123)
-  sampled_patients <- weight_trajectory_data %>%
-    group_by(weight_loss_cat) %>%
-    distinct(person_id) %>%
-    {
-      group_split(.) %>%
-        map_dfr(~ slice_sample(.x, n = min(30, nrow(.x))))
-    }
-
-  weight_trajectory_sample <- weight_trajectory_data %>%
-    inner_join(sampled_patients, by = c("person_id", "weight_loss_cat"))
-
-  # Create spaghetti plot
-  fig4 <- ggplot() +
-    # Individual trajectories
-    geom_line(data = weight_trajectory_sample,
-              aes(x = period_num, y = weight, group = person_id),
-              alpha = 0.2, linewidth = 0.3) +
-    # Mean trajectory
-    geom_line(data = mean_trajectories,
-              aes(x = period_num, y = mean_weight),
-              color = "black", linewidth = 1.5) +
-    geom_ribbon(data = mean_trajectories,
-                aes(x = period_num,
-                    ymin = mean_weight - se_weight,
-                    ymax = mean_weight + se_weight),
-                alpha = 0.2, fill = "black") +
-    facet_wrap(~weight_loss_cat, ncol = 3) +
-    labs(
-      title = "Individual Weight Trajectories by Weight Loss Category",
-      subtitle = sprintf("Categorization based on %s; showing up to 30 patients per group", max_diff_period),
-      x = "Period (0 = Baseline)",
-      y = "Weight (kg)"
-    ) +
-    theme_minimal(base_size = 12) +
-    theme(
-      plot.title = element_text(face = "bold", size = 14),
-      strip.text = element_text(face = "bold", size = 11),
-      panel.grid.minor = element_blank()
-    )
-
-  ggsave("sensitivity_figure4_spaghetti_weight_by_category.png", fig4,
-         width = 14, height = 5, dpi = 300, bg = "white")
-
-  cat("  ✓ sensitivity_figure4_spaghetti_weight_by_category.png\n\n")
-}
+cat("  ✓ sensitivity_figure2_steps_trajectories_by_category.png\n\n")
 
 # =============================================================================
-# FIGURE 5: SPAGHETTI PLOTS - STEPS TRAJECTORIES BY CATEGORY
+# FIGURE 3: CALORIES TRAJECTORIES BY WEIGHT LOSS CATEGORY
 # =============================================================================
 
-cat("### CREATING FIGURE 5: Spaghetti Plots - Steps Trajectories ###\n\n")
+cat("### CREATING FIGURE 3: Calories Trajectories by Weight Loss Category ###\n\n")
 
-if (exists("all_data_long")) {
-  # Get steps trajectories
-  steps_trajectory_data <- all_data_long %>%
-    select(person_id, period, period_num, steps) %>%
-    filter(!is.na(steps)) %>%
-    inner_join(best_period_data, by = "person_id") %>%
-    mutate(
-      weight_loss_cat = factor(weight_loss_cat,
-                                levels = c("< 5% loss", "5-10% loss", "> 10% loss"))
-    )
+# Calculate summary statistics
+calories_summary <- all_timepoints %>%
+  group_by(weight_loss_cat, timepoint, timepoint_num) %>%
+  summarize(
+    n = n(),
+    mean_calories = mean(calories, na.rm = TRUE),
+    se_calories = sd(calories, na.rm = TRUE) / sqrt(n()),
+    .groups = "drop"
+  )
 
-  # Calculate mean trajectories
-  mean_steps_trajectories <- steps_trajectory_data %>%
-    group_by(weight_loss_cat, period, period_num) %>%
-    summarize(
-      mean_steps = mean(steps, na.rm = TRUE),
-      se_steps = sd(steps, na.rm = TRUE) / sqrt(n()),
-      .groups = "drop"
-    )
+# Create plot
+fig3 <- ggplot(calories_summary,
+               aes(x = timepoint, y = mean_calories, color = weight_loss_cat, group = weight_loss_cat)) +
+  geom_line(linewidth = 1.2) +
+  geom_point(size = 3) +
+  geom_errorbar(aes(ymin = mean_calories - se_calories, ymax = mean_calories + se_calories),
+                width = 0.2, linewidth = 0.8) +
+  geom_text(aes(label = sprintf("n=%d", n)),
+            vjust = -1.5, size = 3, show.legend = FALSE) +
+  scale_color_manual(
+    values = c("< 5% loss" = "#E74C3C",
+               "5-10% loss" = "#F39C12",
+               "> 10% loss" = "#27AE60"),
+    name = "Weight Loss Category\n(Baseline to Nadir)"
+  ) +
+  labs(
+    title = "Activity Calories Trajectories by Weight Loss Category",
+    subtitle = "Patients categorized by total weight loss from baseline to nadir",
+    x = "Timepoint",
+    y = "Activity Calories (kcal, mean ± SE)"
+  ) +
+  theme_minimal(base_size = 14) +
+  theme(
+    legend.position = "bottom",
+    plot.title = element_text(face = "bold", size = 16),
+    panel.grid.minor = element_blank(),
+    axis.text.x = element_text(angle = 0, hjust = 0.5)
+  )
 
-  # Sample patients
-  steps_trajectory_sample <- steps_trajectory_data %>%
-    inner_join(sampled_patients, by = c("person_id", "weight_loss_cat"))
+ggsave("sensitivity_figure3_calories_trajectories_by_category.png", fig3,
+       width = 10, height = 7, dpi = 300, bg = "white")
 
-  # Create spaghetti plot
-  fig5 <- ggplot() +
-    # Individual trajectories
-    geom_line(data = steps_trajectory_sample,
-              aes(x = period_num, y = steps, group = person_id),
-              alpha = 0.2, linewidth = 0.3) +
-    # Mean trajectory
-    geom_line(data = mean_steps_trajectories,
-              aes(x = period_num, y = mean_steps),
-              color = "blue", linewidth = 1.5) +
-    geom_ribbon(data = mean_steps_trajectories,
-                aes(x = period_num,
-                    ymin = mean_steps - se_steps,
-                    ymax = mean_steps + se_steps),
-                alpha = 0.2, fill = "blue") +
-    facet_wrap(~weight_loss_cat, ncol = 3) +
-    labs(
-      title = "Individual Steps Trajectories by Weight Loss Category",
-      subtitle = sprintf("Categorization based on %s; showing up to 30 patients per group", max_diff_period),
-      x = "Period (0 = Baseline)",
-      y = "Daily Steps"
-    ) +
-    theme_minimal(base_size = 12) +
-    theme(
-      plot.title = element_text(face = "bold", size = 14),
-      strip.text = element_text(face = "bold", size = 11),
-      panel.grid.minor = element_blank()
-    )
+cat("  ✓ sensitivity_figure3_calories_trajectories_by_category.png\n\n")
 
-  ggsave("sensitivity_figure5_spaghetti_steps_by_category.png", fig5,
-         width = 14, height = 5, dpi = 300, bg = "white")
+# =============================================================================
+# FIGURE 4: COMBINED PANEL - WEIGHT, STEPS, CALORIES
+# =============================================================================
 
-  cat("  ✓ sensitivity_figure5_spaghetti_steps_by_category.png\n\n")
-}
+cat("### CREATING FIGURE 4: Combined Panel Figure ###\n\n")
+
+# Create individual panels without legends
+p4a <- ggplot(weight_summary,
+              aes(x = timepoint, y = mean_weight, color = weight_loss_cat, group = weight_loss_cat)) +
+  geom_line(linewidth = 1) +
+  geom_point(size = 2.5) +
+  geom_errorbar(aes(ymin = mean_weight - se_weight, ymax = mean_weight + se_weight),
+                width = 0.2, linewidth = 0.7) +
+  geom_text(aes(label = sprintf("n=%d", n)),
+            vjust = -1.2, size = 2.5, show.legend = FALSE) +
+  scale_color_manual(
+    values = c("< 5% loss" = "#E74C3C",
+               "5-10% loss" = "#F39C12",
+               "> 10% loss" = "#27AE60")
+  ) +
+  labs(
+    title = "A. Weight",
+    x = "",
+    y = "Weight (kg)"
+  ) +
+  theme_minimal(base_size = 11) +
+  theme(
+    legend.position = "none",
+    plot.title = element_text(face = "bold"),
+    panel.grid.minor = element_blank(),
+    axis.text.x = element_text(angle = 45, hjust = 1)
+  )
+
+p4b <- ggplot(steps_summary,
+              aes(x = timepoint, y = mean_steps, color = weight_loss_cat, group = weight_loss_cat)) +
+  geom_line(linewidth = 1) +
+  geom_point(size = 2.5) +
+  geom_errorbar(aes(ymin = mean_steps - se_steps, ymax = mean_steps + se_steps),
+                width = 0.2, linewidth = 0.7) +
+  geom_text(aes(label = sprintf("n=%d", n)),
+            vjust = -1.2, size = 2.5, show.legend = FALSE) +
+  scale_color_manual(
+    values = c("< 5% loss" = "#E74C3C",
+               "5-10% loss" = "#F39C12",
+               "> 10% loss" = "#27AE60")
+  ) +
+  labs(
+    title = "B. Daily Steps",
+    x = "",
+    y = "Steps (n/day)"
+  ) +
+  theme_minimal(base_size = 11) +
+  theme(
+    legend.position = "none",
+    plot.title = element_text(face = "bold"),
+    panel.grid.minor = element_blank(),
+    axis.text.x = element_text(angle = 45, hjust = 1)
+  )
+
+p4c <- ggplot(calories_summary,
+              aes(x = timepoint, y = mean_calories, color = weight_loss_cat, group = weight_loss_cat)) +
+  geom_line(linewidth = 1) +
+  geom_point(size = 2.5) +
+  geom_errorbar(aes(ymin = mean_calories - se_calories, ymax = mean_calories + se_calories),
+                width = 0.2, linewidth = 0.7) +
+  geom_text(aes(label = sprintf("n=%d", n)),
+            vjust = -1.2, size = 2.5, show.legend = FALSE) +
+  scale_color_manual(
+    values = c("< 5% loss" = "#E74C3C",
+               "5-10% loss" = "#F39C12",
+               "> 10% loss" = "#27AE60"),
+    name = "Weight Loss Category"
+  ) +
+  labs(
+    title = "C. Activity Calories",
+    x = "",
+    y = "Calories (kcal)"
+  ) +
+  theme_minimal(base_size = 11) +
+  theme(
+    legend.position = "bottom",
+    plot.title = element_text(face = "bold"),
+    panel.grid.minor = element_blank(),
+    axis.text.x = element_text(angle = 45, hjust = 1)
+  )
+
+# Combine panels
+fig4 <- (p4a + p4b) / p4c +
+  plot_layout(heights = c(1, 1.2), guides = "collect") &
+  theme(legend.position = "bottom")
+
+ggsave("sensitivity_figure4_combined_trajectories.png", fig4,
+       width = 12, height = 10, dpi = 300, bg = "white")
+
+cat("  ✓ sensitivity_figure4_combined_trajectories.png\n\n")
+
+# =============================================================================
+# FIGURE 5: SPAGHETTI PLOT - WEIGHT TRAJECTORIES
+# =============================================================================
+
+cat("### CREATING FIGURE 5: Spaghetti Plot - Weight Trajectories ###\n\n")
+
+# Sample patients for clearer visualization (max 30 per category)
+set.seed(123)
+sampled_patients <- all_timepoints %>%
+  group_by(weight_loss_cat) %>%
+  distinct(person_id) %>%
+  {
+    group_split(.) %>%
+      map_dfr(~ slice_sample(.x, n = min(30, nrow(.x))))
+  }
+
+weight_trajectory_sample <- all_timepoints %>%
+  inner_join(sampled_patients, by = c("person_id", "weight_loss_cat"))
+
+# Create spaghetti plot
+fig5 <- ggplot() +
+  # Individual trajectories
+  geom_line(data = weight_trajectory_sample,
+            aes(x = timepoint_num, y = weight, group = person_id),
+            alpha = 0.2, linewidth = 0.3) +
+  # Mean trajectory
+  geom_line(data = weight_summary,
+            aes(x = timepoint_num, y = mean_weight, group = 1),
+            color = "black", linewidth = 1.5) +
+  geom_ribbon(data = weight_summary,
+              aes(x = timepoint_num,
+                  ymin = mean_weight - se_weight,
+                  ymax = mean_weight + se_weight,
+                  group = 1),
+              alpha = 0.2, fill = "black") +
+  facet_wrap(~weight_loss_cat, ncol = 3) +
+  scale_x_continuous(
+    breaks = c(0, 1, 2, 3, 4),
+    labels = c("Baseline", "1-90d", "91-180d", "181-365d", "Nadir")
+  ) +
+  labs(
+    title = "Individual Weight Trajectories by Weight Loss Category",
+    subtitle = "Up to 30 patients per group; bold line = mean ± SE",
+    x = "Timepoint",
+    y = "Weight (kg)"
+  ) +
+  theme_minimal(base_size = 12) +
+  theme(
+    plot.title = element_text(face = "bold", size = 14),
+    strip.text = element_text(face = "bold", size = 11),
+    panel.grid.minor = element_blank(),
+    axis.text.x = element_text(angle = 45, hjust = 1)
+  )
+
+ggsave("sensitivity_figure5_spaghetti_weight.png", fig5,
+       width = 14, height = 5, dpi = 300, bg = "white")
+
+cat("  ✓ sensitivity_figure5_spaghetti_weight.png\n\n")
+
+# =============================================================================
+# FIGURE 6: SPAGHETTI PLOT - STEPS TRAJECTORIES
+# =============================================================================
+
+cat("### CREATING FIGURE 6: Spaghetti Plot - Steps Trajectories ###\n\n")
+
+steps_trajectory_sample <- all_timepoints %>%
+  inner_join(sampled_patients, by = c("person_id", "weight_loss_cat"))
+
+# Create spaghetti plot
+fig6 <- ggplot() +
+  # Individual trajectories
+  geom_line(data = steps_trajectory_sample,
+            aes(x = timepoint_num, y = steps, group = person_id),
+            alpha = 0.2, linewidth = 0.3) +
+  # Mean trajectory
+  geom_line(data = steps_summary,
+            aes(x = timepoint_num, y = mean_steps, group = 1),
+            color = "blue", linewidth = 1.5) +
+  geom_ribbon(data = steps_summary,
+              aes(x = timepoint_num,
+                  ymin = mean_steps - se_steps,
+                  ymax = mean_steps + se_steps,
+                  group = 1),
+              alpha = 0.2, fill = "blue") +
+  facet_wrap(~weight_loss_cat, ncol = 3) +
+  scale_x_continuous(
+    breaks = c(0, 1, 2, 3, 4),
+    labels = c("Baseline", "1-90d", "91-180d", "181-365d", "Nadir")
+  ) +
+  labs(
+    title = "Individual Steps Trajectories by Weight Loss Category",
+    subtitle = "Up to 30 patients per group; bold line = mean ± SE",
+    x = "Timepoint",
+    y = "Daily Steps"
+  ) +
+  theme_minimal(base_size = 12) +
+  theme(
+    plot.title = element_text(face = "bold", size = 14),
+    strip.text = element_text(face = "bold", size = 11),
+    panel.grid.minor = element_blank(),
+    axis.text.x = element_text(angle = 45, hjust = 1)
+  )
+
+ggsave("sensitivity_figure6_spaghetti_steps.png", fig6,
+       width = 14, height = 5, dpi = 300, bg = "white")
+
+cat("  ✓ sensitivity_figure6_spaghetti_steps.png\n\n")
 
 # =============================================================================
 # SUMMARY
@@ -493,22 +500,34 @@ cat("SENSITIVITY VISUALIZATIONS COMPLETE\n")
 cat("=============================================================================\n\n")
 
 cat("Created figures:\n")
-cat("  1. sensitivity_figure1_activity_by_weight_loss.png\n")
-cat("     - Steps and calories at baseline vs follow-up by weight loss category\n")
-cat(sprintf("     - Period: %s (highest difference between groups)\n", max_diff_period))
-cat("  2. sensitivity_figure2_weight_by_step_change.png\n")
-cat("     - Weight at baseline vs follow-up by step change category\n")
-cat(sprintf("     - Period: %s (highest difference between groups)\n", max_diff_period_steps))
-if (exists("fig3")) {
-  cat("  3. sensitivity_figure3_weight_by_step_change_nadir.png\n")
-  cat("     - Weight at baseline vs nadir by step change category\n")
-}
-if (exists("fig4")) {
-  cat("  4. sensitivity_figure4_spaghetti_weight_by_category.png\n")
-  cat("     - Individual weight trajectories by weight loss category\n")
-}
-if (exists("fig5")) {
-  cat("  5. sensitivity_figure5_spaghetti_steps_by_category.png\n")
-  cat("     - Individual steps trajectories by weight loss category\n")
-}
-cat("\n=============================================================================\n")
+cat("  1. sensitivity_figure1_weight_trajectories_by_category.png\n")
+cat("     - Weight across all timepoints by weight loss category\n")
+cat("     - Shows: Baseline, 1-90d, 91-180d, 181-365d, Nadir\n")
+cat("     - Sample sizes displayed at each timepoint\n\n")
+
+cat("  2. sensitivity_figure2_steps_trajectories_by_category.png\n")
+cat("     - Steps across all timepoints by weight loss category\n")
+cat("     - Sample sizes displayed at each timepoint\n\n")
+
+cat("  3. sensitivity_figure3_calories_trajectories_by_category.png\n")
+cat("     - Calories across all timepoints by weight loss category\n")
+cat("     - Sample sizes displayed at each timepoint\n\n")
+
+cat("  4. sensitivity_figure4_combined_trajectories.png\n")
+cat("     - 3-panel figure: Weight, Steps, Calories\n")
+cat("     - All timepoints in one comprehensive view\n\n")
+
+cat("  5. sensitivity_figure5_spaghetti_weight.png\n")
+cat("     - Individual patient weight trajectories\n")
+cat("     - Up to 30 patients per weight loss category\n\n")
+
+cat("  6. sensitivity_figure6_spaghetti_steps.png\n")
+cat("     - Individual patient steps trajectories\n")
+cat("     - Up to 30 patients per weight loss category\n\n")
+
+cat("Weight loss categories based on baseline to nadir:\n")
+cat("  - < 5% loss (red)\n")
+cat("  - 5-10% loss (orange)\n")
+cat("  - > 10% loss (green)\n\n")
+
+cat("=============================================================================\n")
