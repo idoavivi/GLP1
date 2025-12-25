@@ -68,16 +68,14 @@ baseline_activity <- activity_with_glp1 %>%
     .groups = "drop"
   )
 
-# Get baseline WEIGHT data - LATEST weight before GLP-1 initiation
+# Get baseline WEIGHT data - HIGHEST weight (starting weight)
 baseline_weight <- weight_with_glp1 %>%
   filter(person_id %in% eligible_person_ids,
          days_from_initiation >= baseline_start,
          days_from_initiation <= baseline_end,
          !is.na(weight_kg)) %>%
   group_by(person_id) %>%
-  slice_max(measurement_date, n = 1, with_ties = FALSE) %>%  # LATEST weight before initiation
-  ungroup() %>%
-  select(person_id, baseline_weight = weight_kg)
+  summarize(baseline_weight = max(weight_kg, na.rm = TRUE), .groups = "drop")  # HIGHEST weight
 
 # Create BASELINE COHORT - patients with BOTH activity AND weight at baseline
 baseline_cohort <- baseline_activity %>%
@@ -185,10 +183,20 @@ for (period_name in names(time_periods)) {
     )
 
   # Check active treatment at midpoint of period (VECTORIZED)
-  # Get initiation dates for calculating midpoint calendar date
+  # REQUIREMENT: ≥2 prescription fills AND prescription within 90 days of midpoint
   all_patients <- unique(c(activity_period$person_id, weight_period$person_id))
 
+  # First, filter to patients with ≥2 prescription fills
+  patients_with_multiple_fills <- drug_glp1_clean %>%
+    filter(person_id %in% all_patients) %>%
+    group_by(person_id) %>%
+    summarize(n_fills = n_distinct(drug_start_date), .groups = "drop") %>%
+    filter(n_fills >= 2) %>%
+    select(person_id)
+
+  # Then check active prescription at midpoint
   active_treatment_status <- tibble(person_id = all_patients) %>%
+    inner_join(patients_with_multiple_fills, by = "person_id") %>%  # REQUIRE ≥2 fills
     left_join(glp1_initiation %>% select(person_id, glp1_initiation_date), by = "person_id") %>%
     mutate(
       midpoint_date = glp1_initiation_date + midpoint_day,
@@ -205,6 +213,7 @@ for (period_name in names(time_periods)) {
     filter(has_active_rx) %>%
     select(person_id)
 
+  cat(sprintf("  Patients with ≥2 fills: %d/%d\n", nrow(patients_with_multiple_fills), length(all_patients)))
   cat(sprintf("  Active treatment at midpoint: %d/%d patients\n",
               nrow(active_treatment_status), length(all_patients)))
 
