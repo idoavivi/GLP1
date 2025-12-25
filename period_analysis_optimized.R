@@ -575,6 +575,88 @@ cat("\n=== SAVING RESULTS ===\n\n")
 write_csv(comprehensive_table, "period_analysis_optimized_table.csv")
 cat("  ✓ period_analysis_optimized_table.csv\n")
 
+# Save as HTML for better readability
+if (require(knitr, quietly = TRUE) && require(kableExtra, quietly = TRUE)) {
+  html_table <- comprehensive_table %>%
+    kable(format = "html", escape = FALSE, align = "c") %>%
+    kable_styling(
+      bootstrap_options = c("striped", "hover", "condensed", "responsive"),
+      full_width = FALSE,
+      position = "left",
+      font_size = 12
+    ) %>%
+    column_spec(1, bold = TRUE, width = "8em") %>%
+    column_spec(2, width = "6em") %>%
+    add_header_above(c(" " = 4, "Weight" = 3, "Steps" = 3, "Sedentary" = 3,
+                       "Light" = 3, "Fairly" = 3, "Very" = 3, "Calories" = 3)) %>%
+    footnote(
+      general = c(
+        sprintf("Baseline: Days %d to %d (selected for highest weight + most activity)", baseline_start, baseline_end),
+        "Follow-up: 1-90d, 91-180d, 181-365d, plus Nadir",
+        "Nadir: Lowest on-treatment weight (activity = mean of ±30 days)",
+        "Active treatment: ≥2 prescription fills, Rx within 90 days",
+        "Statistical Tests: Paired t-tests (each timepoint vs baseline)",
+        "*** p<0.001, ** p<0.01, * p<0.05"
+      ),
+      general_title = "Notes:"
+    )
+
+  save_kable(html_table, "period_analysis_optimized_table.html")
+  cat("  ✓ period_analysis_optimized_table.html (formatted HTML table)\n")
+} else {
+  # Fallback: simple HTML table without kableExtra
+  html_output <- paste0(
+    "<!DOCTYPE html>\n<html>\n<head>\n",
+    "<style>\n",
+    "body { font-family: Arial, sans-serif; margin: 20px; }\n",
+    "h1 { color: #333; }\n",
+    "table { border-collapse: collapse; width: 100%; margin-top: 20px; }\n",
+    "th, td { border: 1px solid #ddd; padding: 8px; text-align: center; }\n",
+    "th { background-color: #4CAF50; color: white; }\n",
+    "tr:nth-child(even) { background-color: #f2f2f2; }\n",
+    "tr:hover { background-color: #ddd; }\n",
+    ".notes { margin-top: 20px; font-size: 0.9em; color: #666; }\n",
+    "</style>\n",
+    "</head>\n<body>\n",
+    "<h1>GLP-1 Period Analysis - Optimized with Baseline Selection and Nadir</h1>\n",
+    sprintf("<p><strong>Baseline:</strong> Days %d to %d (highest weight, average activity)<br>\n", baseline_start, baseline_end),
+    "<strong>Follow-up:</strong> 1-90d, 91-180d, 181-365d, plus Nadir<br>\n",
+    "<strong>Nadir:</strong> Lowest on-treatment weight (activity = mean of ±30 days)<br>\n",
+    "<strong>Active treatment:</strong> ≥2 prescription fills, Rx within 90 days<br>\n",
+    "<strong>Statistical Tests:</strong> Paired t-tests (each timepoint vs baseline)</p>\n"
+  )
+
+  # Convert table to HTML
+  html_output <- paste0(html_output, "<table>\n<thead>\n<tr>\n")
+  for (col in names(comprehensive_table)) {
+    html_output <- paste0(html_output, "<th>", col, "</th>")
+  }
+  html_output <- paste0(html_output, "\n</tr>\n</thead>\n<tbody>\n")
+
+  for (i in 1:nrow(comprehensive_table)) {
+    html_output <- paste0(html_output, "<tr>\n")
+    for (col in names(comprehensive_table)) {
+      html_output <- paste0(html_output, "<td>", comprehensive_table[[col]][i], "</td>")
+    }
+    html_output <- paste0(html_output, "\n</tr>\n")
+  }
+
+  html_output <- paste0(
+    html_output,
+    "</tbody>\n</table>\n",
+    "<div class='notes'>\n",
+    "<p><strong>Notes:</strong><br>\n",
+    "*** p<0.001, ** p<0.01, * p<0.05<br>\n",
+    "Δ = Change from baseline<br>\n",
+    "p = P-value from paired t-test</p>\n",
+    "</div>\n",
+    "</body>\n</html>"
+  )
+
+  writeLines(html_output, "period_analysis_optimized_table.html")
+  cat("  ✓ period_analysis_optimized_table.html (simple HTML table)\n")
+}
+
 write_csv(all_results, "period_analysis_optimized_detailed.csv")
 cat("  ✓ period_analysis_optimized_detailed.csv\n")
 
