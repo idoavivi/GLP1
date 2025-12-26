@@ -551,6 +551,40 @@ if (file.exists("period_analysis_short_results.RData")) {
   cat("Loaded period_analysis_short_results.RData\n\n")
 
   # =============================================================================
+  # CREATE WEIGHT LOSS CATEGORIES FOR SHORT PERIODS (SEPARATE FROM MAIN)
+  # =============================================================================
+
+  cat("### CREATING WEIGHT LOSS CATEGORIES (SHORT PERIODS) ###\n\n")
+
+  # Get baseline and nadir from SHORT periods analysis
+  baseline_cohort_short <- baseline_data_short %>%
+    select(person_id, baseline_weight, baseline_steps, baseline_calories)
+
+  nadir_cohort_short <- nadir_data_short %>%
+    select(person_id, nadir_weight, nadir_steps, nadir_calories, days_to_nadir)
+
+  # Calculate weight loss categories based on SHORT periods baseline to nadir
+  weight_loss_categories_short <- baseline_cohort_short %>%
+    inner_join(nadir_cohort_short, by = "person_id") %>%
+    mutate(
+      weight_change = nadir_weight - baseline_weight,
+      weight_pct_change = 100 * weight_change / baseline_weight,
+      weight_loss_cat = case_when(
+        weight_pct_change > -5 ~ "< 5% loss",
+        weight_pct_change <= -5 & weight_pct_change > -10 ~ "5-10% loss",
+        weight_pct_change <= -10 ~ "> 10% loss"
+      )
+    ) %>%
+    select(person_id, weight_loss_cat)
+
+  cat(sprintf("Patients categorized by weight loss (short periods baseline to nadir): %d\n", nrow(weight_loss_categories_short)))
+
+  # Count by category
+  cat("\nWeight loss category distribution (short periods):\n")
+  print(table(weight_loss_categories_short$weight_loss_cat))
+  cat("\n")
+
+  # =============================================================================
   # CREATE LONG FORMAT DATA WITH SHORT PERIODS
   # =============================================================================
 
@@ -636,7 +670,7 @@ if (file.exists("period_analysis_short_results.RData")) {
     period_181_365d_short,
     nadir_long_short
   ) %>%
-    inner_join(weight_loss_categories, by = "person_id") %>%
+    inner_join(weight_loss_categories_short, by = "person_id") %>%
     mutate(
       weight_loss_cat = factor(weight_loss_cat,
                                 levels = c("< 5% loss", "5-10% loss", "> 10% loss")),
