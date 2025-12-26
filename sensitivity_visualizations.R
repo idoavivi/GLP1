@@ -531,3 +531,481 @@ cat("  - 5-10% loss (orange)\n")
 cat("  - > 10% loss (green)\n\n")
 
 cat("=============================================================================\n")
+
+# =============================================================================
+# =============================================================================
+# SHORT PERIODS VISUALIZATIONS (1-30d, 31-90d, 91-180d, 181-365d, Nadir)
+# =============================================================================
+# =============================================================================
+
+if (file.exists("period_analysis_short_results.RData")) {
+
+  cat("\n\n")
+  cat("=============================================================================\n")
+  cat("=============================================================================\n")
+  cat("SHORT PERIODS SENSITIVITY VISUALIZATIONS\n")
+  cat("=============================================================================\n")
+  cat("=============================================================================\n\n")
+
+  load("period_analysis_short_results.RData")
+  cat("Loaded period_analysis_short_results.RData\n\n")
+
+  # =============================================================================
+  # CREATE LONG FORMAT DATA WITH SHORT PERIODS
+  # =============================================================================
+
+  cat("### CREATING LONG FORMAT DATA (SHORT PERIODS) ###\n\n")
+
+  # Use same baseline
+  baseline_long_short_vis <- baseline_data_short %>%
+    mutate(
+      timepoint = "Baseline",
+      timepoint_num = 0,
+      weight = baseline_weight,
+      steps = baseline_steps,
+      calories = baseline_calories
+    ) %>%
+    select(person_id, timepoint, timepoint_num, weight, steps, calories)
+
+  # 1-30d
+  period_1_30d <- period_data_list_short[["1-30d"]] %>%
+    select(person_id, period_weight, period_steps, period_calories) %>%
+    mutate(
+      timepoint = "1-30d",
+      timepoint_num = 1,
+      weight = period_weight,
+      steps = period_steps,
+      calories = period_calories
+    ) %>%
+    select(person_id, timepoint, timepoint_num, weight, steps, calories)
+
+  # 31-90d
+  period_31_90d <- period_data_list_short[["31-90d"]] %>%
+    select(person_id, period_weight, period_steps, period_calories) %>%
+    mutate(
+      timepoint = "31-90d",
+      timepoint_num = 2,
+      weight = period_weight,
+      steps = period_steps,
+      calories = period_calories
+    ) %>%
+    select(person_id, timepoint, timepoint_num, weight, steps, calories)
+
+  # 91-180d
+  period_91_180d_short <- period_data_list_short[["91-180d"]] %>%
+    select(person_id, period_weight, period_steps, period_calories) %>%
+    mutate(
+      timepoint = "91-180d",
+      timepoint_num = 3,
+      weight = period_weight,
+      steps = period_steps,
+      calories = period_calories
+    ) %>%
+    select(person_id, timepoint, timepoint_num, weight, steps, calories)
+
+  # 181-365d
+  period_181_365d_short <- period_data_list_short[["181-365d"]] %>%
+    select(person_id, period_weight, period_steps, period_calories) %>%
+    mutate(
+      timepoint = "181-365d",
+      timepoint_num = 4,
+      weight = period_weight,
+      steps = period_steps,
+      calories = period_calories
+    ) %>%
+    select(person_id, timepoint, timepoint_num, weight, steps, calories)
+
+  # Nadir (use from short analysis)
+  nadir_long_short <- nadir_data_short %>%
+    select(person_id, nadir_weight, nadir_steps, nadir_calories) %>%
+    mutate(
+      timepoint = "Nadir",
+      timepoint_num = 5,
+      weight = nadir_weight,
+      steps = nadir_steps,
+      calories = nadir_calories
+    ) %>%
+    select(person_id, timepoint, timepoint_num, weight, steps, calories)
+
+  # Combine all timepoints
+  all_timepoints_short <- bind_rows(
+    baseline_long_short_vis,
+    period_1_30d,
+    period_31_90d,
+    period_91_180d_short,
+    period_181_365d_short,
+    nadir_long_short
+  ) %>%
+    inner_join(weight_loss_categories, by = "person_id") %>%
+    mutate(
+      weight_loss_cat = factor(weight_loss_cat,
+                                levels = c("< 5% loss", "5-10% loss", "> 10% loss")),
+      timepoint = factor(timepoint,
+                         levels = c("Baseline", "1-30d", "31-90d", "91-180d", "181-365d", "Nadir"))
+    )
+
+  cat(sprintf("Total observations across all timepoints (short): %d\n\n", nrow(all_timepoints_short)))
+
+  # =============================================================================
+  # FIGURE 1 SHORT: WEIGHT TRAJECTORIES BY WEIGHT LOSS CATEGORY
+  # =============================================================================
+
+  cat("### CREATING FIGURE 1 (SHORT): Weight Trajectories ###\n\n")
+
+  weight_summary_short <- all_timepoints_short %>%
+    group_by(weight_loss_cat, timepoint, timepoint_num) %>%
+    summarize(
+      n = n(),
+      mean_weight = mean(weight, na.rm = TRUE),
+      se_weight = sd(weight, na.rm = TRUE) / sqrt(n()),
+      .groups = "drop"
+    )
+
+  fig1_short <- ggplot(weight_summary_short,
+                       aes(x = timepoint, y = mean_weight, color = weight_loss_cat, group = weight_loss_cat)) +
+    geom_line(linewidth = 1.2) +
+    geom_point(size = 3) +
+    geom_errorbar(aes(ymin = mean_weight - se_weight, ymax = mean_weight + se_weight),
+                  width = 0.2, linewidth = 0.8) +
+    geom_text(aes(label = sprintf("n=%d", n)),
+              vjust = -1.5, size = 3, show.legend = FALSE) +
+    scale_color_manual(
+      values = c("< 5% loss" = "#E74C3C",
+                 "5-10% loss" = "#F39C12",
+                 "> 10% loss" = "#27AE60"),
+      name = "Weight Loss Category\n(Baseline to Nadir)"
+    ) +
+    labs(
+      title = "Weight Trajectories by Weight Loss Category (Short Periods)",
+      subtitle = "Includes early response period (1-30d)",
+      x = "Timepoint",
+      y = "Weight (kg, mean ± SE)"
+    ) +
+    theme_minimal(base_size = 14) +
+    theme(
+      legend.position = "bottom",
+      plot.title = element_text(face = "bold", size = 16),
+      panel.grid.minor = element_blank(),
+      axis.text.x = element_text(angle = 45, hjust = 1)
+    )
+
+  ggsave("sensitivity_figure1_weight_trajectories_by_category_short.png", fig1_short,
+         width = 11, height = 7, dpi = 300, bg = "white")
+
+  cat("  ✓ sensitivity_figure1_weight_trajectories_by_category_short.png\n\n")
+
+  # =============================================================================
+  # FIGURE 2 SHORT: STEPS TRAJECTORIES BY WEIGHT LOSS CATEGORY
+  # =============================================================================
+
+  cat("### CREATING FIGURE 2 (SHORT): Steps Trajectories ###\n\n")
+
+  steps_summary_short <- all_timepoints_short %>%
+    group_by(weight_loss_cat, timepoint, timepoint_num) %>%
+    summarize(
+      n = n(),
+      mean_steps = mean(steps, na.rm = TRUE),
+      se_steps = sd(steps, na.rm = TRUE) / sqrt(n()),
+      .groups = "drop"
+    )
+
+  fig2_short <- ggplot(steps_summary_short,
+                       aes(x = timepoint, y = mean_steps, color = weight_loss_cat, group = weight_loss_cat)) +
+    geom_line(linewidth = 1.2) +
+    geom_point(size = 3) +
+    geom_errorbar(aes(ymin = mean_steps - se_steps, ymax = mean_steps + se_steps),
+                  width = 0.2, linewidth = 0.8) +
+    geom_text(aes(label = sprintf("n=%d", n)),
+              vjust = -1.5, size = 3, show.legend = FALSE) +
+    scale_color_manual(
+      values = c("< 5% loss" = "#E74C3C",
+                 "5-10% loss" = "#F39C12",
+                 "> 10% loss" = "#27AE60"),
+      name = "Weight Loss Category\n(Baseline to Nadir)"
+    ) +
+    labs(
+      title = "Steps Trajectories by Weight Loss Category (Short Periods)",
+      subtitle = "Includes early response period (1-30d)",
+      x = "Timepoint",
+      y = "Steps (mean ± SE)"
+    ) +
+    theme_minimal(base_size = 14) +
+    theme(
+      legend.position = "bottom",
+      plot.title = element_text(face = "bold", size = 16),
+      panel.grid.minor = element_blank(),
+      axis.text.x = element_text(angle = 45, hjust = 1)
+    )
+
+  ggsave("sensitivity_figure2_steps_trajectories_by_category_short.png", fig2_short,
+         width = 11, height = 7, dpi = 300, bg = "white")
+
+  cat("  ✓ sensitivity_figure2_steps_trajectories_by_category_short.png\n\n")
+
+  # =============================================================================
+  # FIGURE 3 SHORT: CALORIES TRAJECTORIES BY WEIGHT LOSS CATEGORY
+  # =============================================================================
+
+  cat("### CREATING FIGURE 3 (SHORT): Calories Trajectories ###\n\n")
+
+  calories_summary_short <- all_timepoints_short %>%
+    group_by(weight_loss_cat, timepoint, timepoint_num) %>%
+    summarize(
+      n = n(),
+      mean_calories = mean(calories, na.rm = TRUE),
+      se_calories = sd(calories, na.rm = TRUE) / sqrt(n()),
+      .groups = "drop"
+    )
+
+  fig3_short <- ggplot(calories_summary_short,
+                       aes(x = timepoint, y = mean_calories, color = weight_loss_cat, group = weight_loss_cat)) +
+    geom_line(linewidth = 1.2) +
+    geom_point(size = 3) +
+    geom_errorbar(aes(ymin = mean_calories - se_calories, ymax = mean_calories + se_calories),
+                  width = 0.2, linewidth = 0.8) +
+    geom_text(aes(label = sprintf("n=%d", n)),
+              vjust = -1.5, size = 3, show.legend = FALSE) +
+    scale_color_manual(
+      values = c("< 5% loss" = "#E74C3C",
+                 "5-10% loss" = "#F39C12",
+                 "> 10% loss" = "#27AE60"),
+      name = "Weight Loss Category\n(Baseline to Nadir)"
+    ) +
+    labs(
+      title = "Calories Trajectories by Weight Loss Category (Short Periods)",
+      subtitle = "Includes early response period (1-30d)",
+      x = "Timepoint",
+      y = "Activity Calories (mean ± SE)"
+    ) +
+    theme_minimal(base_size = 14) +
+    theme(
+      legend.position = "bottom",
+      plot.title = element_text(face = "bold", size = 16),
+      panel.grid.minor = element_blank(),
+      axis.text.x = element_text(angle = 45, hjust = 1)
+    )
+
+  ggsave("sensitivity_figure3_calories_trajectories_by_category_short.png", fig3_short,
+         width = 11, height = 7, dpi = 300, bg = "white")
+
+  cat("  ✓ sensitivity_figure3_calories_trajectories_by_category_short.png\n\n")
+
+  # =============================================================================
+  # FIGURE 4 SHORT: COMBINED TRAJECTORIES (3-PANEL)
+  # =============================================================================
+
+  cat("### CREATING FIGURE 4 (SHORT): Combined 3-Panel Figure ###\n\n")
+
+  # Weight panel
+  p1_short <- ggplot(weight_summary_short,
+                     aes(x = timepoint, y = mean_weight, color = weight_loss_cat, group = weight_loss_cat)) +
+    geom_line(linewidth = 1) +
+    geom_point(size = 2.5) +
+    geom_errorbar(aes(ymin = mean_weight - se_weight, ymax = mean_weight + se_weight),
+                  width = 0.2, linewidth = 0.7) +
+    scale_color_manual(
+      values = c("< 5% loss" = "#E74C3C",
+                 "5-10% loss" = "#F39C12",
+                 "> 10% loss" = "#27AE60"),
+      name = "Weight Loss Category"
+    ) +
+    labs(
+      title = "A. Weight",
+      x = NULL,
+      y = "Weight (kg, mean ± SE)"
+    ) +
+    theme_minimal(base_size = 12) +
+    theme(
+      legend.position = "none",
+      plot.title = element_text(face = "bold"),
+      panel.grid.minor = element_blank(),
+      axis.text.x = element_text(angle = 45, hjust = 1)
+    )
+
+  # Steps panel
+  p2_short <- ggplot(steps_summary_short,
+                     aes(x = timepoint, y = mean_steps, color = weight_loss_cat, group = weight_loss_cat)) +
+    geom_line(linewidth = 1) +
+    geom_point(size = 2.5) +
+    geom_errorbar(aes(ymin = mean_steps - se_steps, ymax = mean_steps + se_steps),
+                  width = 0.2, linewidth = 0.7) +
+    scale_color_manual(
+      values = c("< 5% loss" = "#E74C3C",
+                 "5-10% loss" = "#F39C12",
+                 "> 10% loss" = "#27AE60"),
+      name = "Weight Loss Category"
+    ) +
+    labs(
+      title = "B. Steps",
+      x = NULL,
+      y = "Steps (mean ± SE)"
+    ) +
+    theme_minimal(base_size = 12) +
+    theme(
+      legend.position = "none",
+      plot.title = element_text(face = "bold"),
+      panel.grid.minor = element_blank(),
+      axis.text.x = element_text(angle = 45, hjust = 1)
+    )
+
+  # Calories panel
+  p3_short <- ggplot(calories_summary_short,
+                     aes(x = timepoint, y = mean_calories, color = weight_loss_cat, group = weight_loss_cat)) +
+    geom_line(linewidth = 1) +
+    geom_point(size = 2.5) +
+    geom_errorbar(aes(ymin = mean_calories - se_calories, ymax = mean_calories + se_calories),
+                  width = 0.2, linewidth = 0.7) +
+    scale_color_manual(
+      values = c("< 5% loss" = "#E74C3C",
+                 "5-10% loss" = "#F39C12",
+                 "> 10% loss" = "#27AE60"),
+      name = "Weight Loss Category\n(Baseline to Nadir)"
+    ) +
+    labs(
+      title = "C. Activity Calories",
+      x = "Timepoint",
+      y = "Calories (mean ± SE)"
+    ) +
+    theme_minimal(base_size = 12) +
+    theme(
+      legend.position = "bottom",
+      plot.title = element_text(face = "bold"),
+      panel.grid.minor = element_blank(),
+      axis.text.x = element_text(angle = 45, hjust = 1)
+    )
+
+  fig4_short <- (p1_short / p2_short / p3_short) +
+    plot_annotation(
+      title = "Combined Trajectories by Weight Loss Category (Short Periods)",
+      subtitle = "Includes early response period (1-30d)",
+      theme = theme(plot.title = element_text(face = "bold", size = 16))
+    )
+
+  ggsave("sensitivity_figure4_combined_trajectories_short.png", fig4_short,
+         width = 10, height = 12, dpi = 300, bg = "white")
+
+  cat("  ✓ sensitivity_figure4_combined_trajectories_short.png\n\n")
+
+  # =============================================================================
+  # FIGURE 5 SHORT: SPAGHETTI PLOT - WEIGHT
+  # =============================================================================
+
+  cat("### CREATING FIGURE 5 (SHORT): Spaghetti Plot - Weight ###\n\n")
+
+  # Sample patients for readability
+  set.seed(123)
+  sampled_patients_short <- all_timepoints_short %>%
+    group_by(weight_loss_cat) %>%
+    distinct(person_id) %>%
+    slice_sample(n = min(30, n())) %>%
+    ungroup()
+
+  spaghetti_data_weight_short <- all_timepoints_short %>%
+    semi_join(sampled_patients_short, by = c("person_id", "weight_loss_cat"))
+
+  fig5_short <- ggplot(spaghetti_data_weight_short,
+                       aes(x = timepoint, y = weight, group = person_id, color = weight_loss_cat)) +
+    geom_line(alpha = 0.3, linewidth = 0.5) +
+    geom_point(alpha = 0.4, size = 1.5) +
+    facet_wrap(~weight_loss_cat, ncol = 1) +
+    scale_color_manual(
+      values = c("< 5% loss" = "#E74C3C",
+                 "5-10% loss" = "#F39C12",
+                 "> 10% loss" = "#27AE60")
+    ) +
+    labs(
+      title = "Individual Patient Weight Trajectories (Short Periods)",
+      subtitle = "Up to 30 patients per weight loss category",
+      x = "Timepoint",
+      y = "Weight (kg)"
+    ) +
+    theme_minimal(base_size = 12) +
+    theme(
+      legend.position = "none",
+      plot.title = element_text(face = "bold", size = 16),
+      panel.grid.minor = element_blank(),
+      axis.text.x = element_text(angle = 45, hjust = 1),
+      strip.text = element_text(face = "bold", size = 12)
+    )
+
+  ggsave("sensitivity_figure5_spaghetti_weight_short.png", fig5_short,
+         width = 10, height = 10, dpi = 300, bg = "white")
+
+  cat("  ✓ sensitivity_figure5_spaghetti_weight_short.png\n\n")
+
+  # =============================================================================
+  # FIGURE 6 SHORT: SPAGHETTI PLOT - STEPS
+  # =============================================================================
+
+  cat("### CREATING FIGURE 6 (SHORT): Spaghetti Plot - Steps ###\n\n")
+
+  spaghetti_data_steps_short <- all_timepoints_short %>%
+    semi_join(sampled_patients_short, by = c("person_id", "weight_loss_cat"))
+
+  fig6_short <- ggplot(spaghetti_data_steps_short,
+                       aes(x = timepoint, y = steps, group = person_id, color = weight_loss_cat)) +
+    geom_line(alpha = 0.3, linewidth = 0.5) +
+    geom_point(alpha = 0.4, size = 1.5) +
+    facet_wrap(~weight_loss_cat, ncol = 1) +
+    scale_color_manual(
+      values = c("< 5% loss" = "#E74C3C",
+                 "5-10% loss" = "#F39C12",
+                 "> 10% loss" = "#27AE60")
+    ) +
+    labs(
+      title = "Individual Patient Steps Trajectories (Short Periods)",
+      subtitle = "Up to 30 patients per weight loss category",
+      x = "Timepoint",
+      y = "Steps"
+    ) +
+    theme_minimal(base_size = 12) +
+    theme(
+      legend.position = "none",
+      plot.title = element_text(face = "bold", size = 16),
+      panel.grid.minor = element_blank(),
+      axis.text.x = element_text(angle = 45, hjust = 1),
+      strip.text = element_text(face = "bold", size = 12)
+    )
+
+  ggsave("sensitivity_figure6_spaghetti_steps_short.png", fig6_short,
+         width = 10, height = 10, dpi = 300, bg = "white")
+
+  cat("  ✓ sensitivity_figure6_spaghetti_steps_short.png\n\n")
+
+  # =============================================================================
+  # SUMMARY - SHORT PERIODS
+  # =============================================================================
+
+  cat("=============================================================================\n")
+  cat("SHORT PERIODS SENSITIVITY VISUALIZATIONS COMPLETE\n")
+  cat("=============================================================================\n\n")
+
+  cat("Created short periods figures:\n")
+  cat("  1. sensitivity_figure1_weight_trajectories_by_category_short.png\n")
+  cat("     - Weight across: Baseline, 1-30d, 31-90d, 91-180d, 181-365d, Nadir\n\n")
+
+  cat("  2. sensitivity_figure2_steps_trajectories_by_category_short.png\n")
+  cat("     - Steps across all short period timepoints\n\n")
+
+  cat("  3. sensitivity_figure3_calories_trajectories_by_category_short.png\n")
+  cat("     - Calories across all short period timepoints\n\n")
+
+  cat("  4. sensitivity_figure4_combined_trajectories_short.png\n")
+  cat("     - 3-panel figure: Weight, Steps, Calories (short periods)\n\n")
+
+  cat("  5. sensitivity_figure5_spaghetti_weight_short.png\n")
+  cat("     - Individual patient weight trajectories (short periods)\n\n")
+
+  cat("  6. sensitivity_figure6_spaghetti_steps_short.png\n")
+  cat("     - Individual patient steps trajectories (short periods)\n\n")
+
+  cat("=============================================================================\n\n")
+
+} else {
+  cat("\n\nShort periods results not found.\n")
+  cat("Run period_analysis_optimized.R to generate short periods data.\n\n")
+}
+
+cat("\n=============================================================================\n")
+cat("ALL SENSITIVITY VISUALIZATIONS COMPLETE\n")
+cat("=============================================================================\n")
