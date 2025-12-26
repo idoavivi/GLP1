@@ -1040,6 +1040,517 @@ if (file.exists("period_analysis_short_results.RData")) {
   cat("Run period_analysis_optimized.R to generate short periods data.\n\n")
 }
 
+# =============================================================================
+# =============================================================================
+# SENSITIVITY COMPARISON PLOTS (MAIN ANALYSIS)
+# =============================================================================
+# =============================================================================
+
+if (file.exists("sensitivity_analysis_results.RData")) {
+
+  cat("\n\n")
+  cat("=============================================================================\n")
+  cat("=============================================================================\n")
+  cat("SENSITIVITY COMPARISON PLOTS (MAIN ANALYSIS)\n")
+  cat("=============================================================================\n")
+  cat("=============================================================================\n\n")
+
+  load("sensitivity_analysis_results.RData")
+  cat("Loaded sensitivity_analysis_results.RData\n\n")
+
+  # =============================================================================
+  # FIGURE 7: STEPS & CALORIES CHANGE BY WEIGHT LOSS (2-CATEGORY)
+  # =============================================================================
+
+  cat("### CREATING FIGURE 7: Activity Changes by Weight Loss (2-Category) ###\n\n")
+
+  # Combine all periods for 2-category analysis
+  activity_by_weight_2cat <- bind_rows(
+    weight_loss_results[["1-90d"]]$summary_2cat %>% mutate(period = "1-90d"),
+    weight_loss_results[["91-180d"]]$summary_2cat %>% mutate(period = "91-180d"),
+    weight_loss_results[["181-365d"]]$summary_2cat %>% mutate(period = "181-365d")
+  ) %>%
+    mutate(
+      period = factor(period, levels = c("1-90d", "91-180d", "181-365d")),
+      weight_loss_cat2 = factor(weight_loss_cat2, levels = c("< 7.5% loss", "≥ 7.5% loss"))
+    )
+
+  # Steps change plot
+  p_steps_2cat <- ggplot(activity_by_weight_2cat,
+                         aes(x = period, y = mean_steps_change, fill = weight_loss_cat2)) +
+    geom_bar(stat = "identity", position = position_dodge(width = 0.8), width = 0.7) +
+    geom_errorbar(aes(ymin = mean_steps_change - sd_steps_change,
+                      ymax = mean_steps_change + sd_steps_change),
+                  position = position_dodge(width = 0.8), width = 0.3) +
+    geom_text(aes(label = sprintf("n=%d", n)),
+              position = position_dodge(width = 0.8),
+              vjust = -0.5, size = 3) +
+    geom_hline(yintercept = 0, linetype = "dashed", color = "gray50") +
+    scale_fill_manual(
+      values = c("< 7.5% loss" = "#E74C3C", "≥ 7.5% loss" = "#27AE60"),
+      name = "Weight Loss Category"
+    ) +
+    labs(
+      title = "A. Steps Change by Weight Loss Category",
+      subtitle = "< 7.5% vs ≥ 7.5% weight loss",
+      x = "Period",
+      y = "Steps Change from Baseline (mean ± SD)"
+    ) +
+    theme_minimal(base_size = 12) +
+    theme(
+      legend.position = "bottom",
+      plot.title = element_text(face = "bold"),
+      panel.grid.minor = element_blank()
+    )
+
+  # Calories change plot
+  p_calories_2cat <- ggplot(activity_by_weight_2cat,
+                            aes(x = period, y = mean_calories_change, fill = weight_loss_cat2)) +
+    geom_bar(stat = "identity", position = position_dodge(width = 0.8), width = 0.7) +
+    geom_errorbar(aes(ymin = mean_calories_change - sd_calories_change,
+                      ymax = mean_calories_change + sd_calories_change),
+                  position = position_dodge(width = 0.8), width = 0.3) +
+    geom_text(aes(label = sprintf("n=%d", n)),
+              position = position_dodge(width = 0.8),
+              vjust = -0.5, size = 3) +
+    geom_hline(yintercept = 0, linetype = "dashed", color = "gray50") +
+    scale_fill_manual(
+      values = c("< 7.5% loss" = "#E74C3C", "≥ 7.5% loss" = "#27AE60"),
+      name = "Weight Loss Category"
+    ) +
+    labs(
+      title = "B. Calories Change by Weight Loss Category",
+      subtitle = "< 7.5% vs ≥ 7.5% weight loss",
+      x = "Period",
+      y = "Calories Change from Baseline (mean ± SD)"
+    ) +
+    theme_minimal(base_size = 12) +
+    theme(
+      legend.position = "bottom",
+      plot.title = element_text(face = "bold"),
+      panel.grid.minor = element_blank()
+    )
+
+  fig7 <- p_steps_2cat / p_calories_2cat +
+    plot_annotation(
+      title = "Activity Changes by Weight Loss Category (2-Category)",
+      theme = theme(plot.title = element_text(face = "bold", size = 16))
+    )
+
+  ggsave("sensitivity_figure7_activity_by_weightloss_2cat.png", fig7,
+         width = 10, height = 10, dpi = 300, bg = "white")
+
+  cat("  ✓ sensitivity_figure7_activity_by_weightloss_2cat.png\n\n")
+
+  # =============================================================================
+  # FIGURE 8: STEPS & CALORIES CHANGE BY WEIGHT LOSS (3-CATEGORY)
+  # =============================================================================
+
+  cat("### CREATING FIGURE 8: Activity Changes by Weight Loss (3-Category) ###\n\n")
+
+  # Combine all periods for 3-category analysis
+  activity_by_weight_3cat <- bind_rows(
+    weight_loss_results[["1-90d"]]$summary_3cat %>% mutate(period = "1-90d"),
+    weight_loss_results[["91-180d"]]$summary_3cat %>% mutate(period = "91-180d"),
+    weight_loss_results[["181-365d"]]$summary_3cat %>% mutate(period = "181-365d")
+  ) %>%
+    mutate(
+      period = factor(period, levels = c("1-90d", "91-180d", "181-365d")),
+      weight_loss_cat3 = factor(weight_loss_cat3,
+                                levels = c("< 5% loss", "5-10% loss", "> 10% loss"))
+    )
+
+  # Steps change plot
+  p_steps_3cat <- ggplot(activity_by_weight_3cat,
+                         aes(x = period, y = mean_steps_change, fill = weight_loss_cat3)) +
+    geom_bar(stat = "identity", position = position_dodge(width = 0.8), width = 0.7) +
+    geom_errorbar(aes(ymin = mean_steps_change - sd_steps_change,
+                      ymax = mean_steps_change + sd_steps_change),
+                  position = position_dodge(width = 0.8), width = 0.25) +
+    geom_text(aes(label = sprintf("n=%d", n)),
+              position = position_dodge(width = 0.8),
+              vjust = -0.5, size = 2.8) +
+    geom_hline(yintercept = 0, linetype = "dashed", color = "gray50") +
+    scale_fill_manual(
+      values = c("< 5% loss" = "#E74C3C",
+                 "5-10% loss" = "#F39C12",
+                 "> 10% loss" = "#27AE60"),
+      name = "Weight Loss Category"
+    ) +
+    labs(
+      title = "A. Steps Change by Weight Loss Category",
+      subtitle = "< 5%, 5-10%, > 10% weight loss",
+      x = "Period",
+      y = "Steps Change from Baseline (mean ± SD)"
+    ) +
+    theme_minimal(base_size = 12) +
+    theme(
+      legend.position = "bottom",
+      plot.title = element_text(face = "bold"),
+      panel.grid.minor = element_blank()
+    )
+
+  # Calories change plot
+  p_calories_3cat <- ggplot(activity_by_weight_3cat,
+                            aes(x = period, y = mean_calories_change, fill = weight_loss_cat3)) +
+    geom_bar(stat = "identity", position = position_dodge(width = 0.8), width = 0.7) +
+    geom_errorbar(aes(ymin = mean_calories_change - sd_calories_change,
+                      ymax = mean_calories_change + sd_calories_change),
+                  position = position_dodge(width = 0.8), width = 0.25) +
+    geom_text(aes(label = sprintf("n=%d", n)),
+              position = position_dodge(width = 0.8),
+              vjust = -0.5, size = 2.8) +
+    geom_hline(yintercept = 0, linetype = "dashed", color = "gray50") +
+    scale_fill_manual(
+      values = c("< 5% loss" = "#E74C3C",
+                 "5-10% loss" = "#F39C12",
+                 "> 10% loss" = "#27AE60"),
+      name = "Weight Loss Category"
+    ) +
+    labs(
+      title = "B. Calories Change by Weight Loss Category",
+      subtitle = "< 5%, 5-10%, > 10% weight loss",
+      x = "Period",
+      y = "Calories Change from Baseline (mean ± SD)"
+    ) +
+    theme_minimal(base_size = 12) +
+    theme(
+      legend.position = "bottom",
+      plot.title = element_text(face = "bold"),
+      panel.grid.minor = element_blank()
+    )
+
+  fig8 <- p_steps_3cat / p_calories_3cat +
+    plot_annotation(
+      title = "Activity Changes by Weight Loss Category (3-Category)",
+      theme = theme(plot.title = element_text(face = "bold", size = 16))
+    )
+
+  ggsave("sensitivity_figure8_activity_by_weightloss_3cat.png", fig8,
+         width = 10, height = 10, dpi = 300, bg = "white")
+
+  cat("  ✓ sensitivity_figure8_activity_by_weightloss_3cat.png\n\n")
+
+  # =============================================================================
+  # FIGURE 9: WEIGHT CHANGE BY STEP CHANGE CATEGORY
+  # =============================================================================
+
+  cat("### CREATING FIGURE 9: Weight Change by Step Change Category ###\n\n")
+
+  # Combine all periods for step change analysis
+  weight_by_steps <- bind_rows(
+    step_change_results[["1-90d"]]$summary %>% mutate(period = "1-90d"),
+    step_change_results[["91-180d"]]$summary %>% mutate(period = "91-180d"),
+    step_change_results[["181-365d"]]$summary %>% mutate(period = "181-365d")
+  ) %>%
+    mutate(
+      period = factor(period, levels = c("1-90d", "91-180d", "181-365d")),
+      step_change_cat = factor(step_change_cat,
+                               levels = c("Decreased > 5%", "No change", "Increased > 5%"))
+    )
+
+  fig9 <- ggplot(weight_by_steps,
+                 aes(x = period, y = mean_weight_change, fill = step_change_cat)) +
+    geom_bar(stat = "identity", position = position_dodge(width = 0.8), width = 0.7) +
+    geom_errorbar(aes(ymin = mean_weight_change - sd_weight_change,
+                      ymax = mean_weight_change + sd_weight_change),
+                  position = position_dodge(width = 0.8), width = 0.25) +
+    geom_text(aes(label = sprintf("n=%d", n)),
+              position = position_dodge(width = 0.8),
+              vjust = -0.5, size = 3) +
+    geom_hline(yintercept = 0, linetype = "dashed", color = "gray50") +
+    scale_fill_manual(
+      values = c("Decreased > 5%" = "#E74C3C",
+                 "No change" = "#95A5A6",
+                 "Increased > 5%" = "#27AE60"),
+      name = "Step Change Category"
+    ) +
+    labs(
+      title = "Weight Change by Step Change Category",
+      subtitle = "Comparison across periods",
+      x = "Period",
+      y = "Weight Change from Baseline (kg, mean ± SD)"
+    ) +
+    theme_minimal(base_size = 14) +
+    theme(
+      legend.position = "bottom",
+      plot.title = element_text(face = "bold", size = 16),
+      panel.grid.minor = element_blank()
+    )
+
+  ggsave("sensitivity_figure9_weight_by_stepchange.png", fig9,
+         width = 10, height = 7, dpi = 300, bg = "white")
+
+  cat("  ✓ sensitivity_figure9_weight_by_stepchange.png\n\n")
+
+  cat("=============================================================================\n")
+  cat("MAIN SENSITIVITY COMPARISON PLOTS COMPLETE\n")
+  cat("=============================================================================\n\n")
+
+} else {
+  cat("\n\nMain sensitivity results not found.\n")
+  cat("Run sensitivity_analysis.R first.\n\n")
+}
+
+# =============================================================================
+# =============================================================================
+# SENSITIVITY COMPARISON PLOTS (SHORT PERIODS)
+# =============================================================================
+# =============================================================================
+
+if (file.exists("sensitivity_analysis_short_results.RData")) {
+
+  cat("\n\n")
+  cat("=============================================================================\n")
+  cat("=============================================================================\n")
+  cat("SENSITIVITY COMPARISON PLOTS (SHORT PERIODS)\n")
+  cat("=============================================================================\n")
+  cat("=============================================================================\n\n")
+
+  load("sensitivity_analysis_short_results.RData")
+  cat("Loaded sensitivity_analysis_short_results.RData\n\n")
+
+  # =============================================================================
+  # FIGURE 10: STEPS & CALORIES CHANGE BY WEIGHT LOSS (2-CATEGORY, SHORT)
+  # =============================================================================
+
+  cat("### CREATING FIGURE 10: Activity Changes by Weight Loss (2-Cat, Short) ###\n\n")
+
+  # Combine all periods for 2-category analysis
+  activity_by_weight_2cat_short <- bind_rows(
+    weight_loss_results_short[["1-30d"]]$summary_2cat %>% mutate(period = "1-30d"),
+    weight_loss_results_short[["31-90d"]]$summary_2cat %>% mutate(period = "31-90d"),
+    weight_loss_results_short[["91-180d"]]$summary_2cat %>% mutate(period = "91-180d"),
+    weight_loss_results_short[["181-365d"]]$summary_2cat %>% mutate(period = "181-365d")
+  ) %>%
+    mutate(
+      period = factor(period, levels = c("1-30d", "31-90d", "91-180d", "181-365d")),
+      weight_loss_cat2 = factor(weight_loss_cat2, levels = c("< 7.5% loss", "≥ 7.5% loss"))
+    )
+
+  # Steps change plot
+  p_steps_2cat_short <- ggplot(activity_by_weight_2cat_short,
+                                aes(x = period, y = mean_steps_change, fill = weight_loss_cat2)) +
+    geom_bar(stat = "identity", position = position_dodge(width = 0.8), width = 0.7) +
+    geom_errorbar(aes(ymin = mean_steps_change - sd_steps_change,
+                      ymax = mean_steps_change + sd_steps_change),
+                  position = position_dodge(width = 0.8), width = 0.3) +
+    geom_text(aes(label = sprintf("n=%d", n)),
+              position = position_dodge(width = 0.8),
+              vjust = -0.5, size = 2.8) +
+    geom_hline(yintercept = 0, linetype = "dashed", color = "gray50") +
+    scale_fill_manual(
+      values = c("< 7.5% loss" = "#E74C3C", "≥ 7.5% loss" = "#27AE60"),
+      name = "Weight Loss Category"
+    ) +
+    labs(
+      title = "A. Steps Change by Weight Loss Category",
+      subtitle = "< 7.5% vs ≥ 7.5% weight loss (Short Periods)",
+      x = "Period",
+      y = "Steps Change from Baseline (mean ± SD)"
+    ) +
+    theme_minimal(base_size = 12) +
+    theme(
+      legend.position = "bottom",
+      plot.title = element_text(face = "bold"),
+      panel.grid.minor = element_blank(),
+      axis.text.x = element_text(angle = 0)
+    )
+
+  # Calories change plot
+  p_calories_2cat_short <- ggplot(activity_by_weight_2cat_short,
+                                   aes(x = period, y = mean_calories_change, fill = weight_loss_cat2)) +
+    geom_bar(stat = "identity", position = position_dodge(width = 0.8), width = 0.7) +
+    geom_errorbar(aes(ymin = mean_calories_change - sd_calories_change,
+                      ymax = mean_calories_change + sd_calories_change),
+                  position = position_dodge(width = 0.8), width = 0.3) +
+    geom_text(aes(label = sprintf("n=%d", n)),
+              position = position_dodge(width = 0.8),
+              vjust = -0.5, size = 2.8) +
+    geom_hline(yintercept = 0, linetype = "dashed", color = "gray50") +
+    scale_fill_manual(
+      values = c("< 7.5% loss" = "#E74C3C", "≥ 7.5% loss" = "#27AE60"),
+      name = "Weight Loss Category"
+    ) +
+    labs(
+      title = "B. Calories Change by Weight Loss Category",
+      subtitle = "< 7.5% vs ≥ 7.5% weight loss (Short Periods)",
+      x = "Period",
+      y = "Calories Change from Baseline (mean ± SD)"
+    ) +
+    theme_minimal(base_size = 12) +
+    theme(
+      legend.position = "bottom",
+      plot.title = element_text(face = "bold"),
+      panel.grid.minor = element_blank(),
+      axis.text.x = element_text(angle = 0)
+    )
+
+  fig10 <- p_steps_2cat_short / p_calories_2cat_short +
+    plot_annotation(
+      title = "Activity Changes by Weight Loss Category (2-Category, Short Periods)",
+      theme = theme(plot.title = element_text(face = "bold", size = 16))
+    )
+
+  ggsave("sensitivity_figure10_activity_by_weightloss_2cat_short.png", fig10,
+         width = 11, height = 10, dpi = 300, bg = "white")
+
+  cat("  ✓ sensitivity_figure10_activity_by_weightloss_2cat_short.png\n\n")
+
+  # =============================================================================
+  # FIGURE 11: STEPS & CALORIES CHANGE BY WEIGHT LOSS (3-CATEGORY, SHORT)
+  # =============================================================================
+
+  cat("### CREATING FIGURE 11: Activity Changes by Weight Loss (3-Cat, Short) ###\n\n")
+
+  # Combine all periods for 3-category analysis
+  activity_by_weight_3cat_short <- bind_rows(
+    weight_loss_results_short[["1-30d"]]$summary_3cat %>% mutate(period = "1-30d"),
+    weight_loss_results_short[["31-90d"]]$summary_3cat %>% mutate(period = "31-90d"),
+    weight_loss_results_short[["91-180d"]]$summary_3cat %>% mutate(period = "91-180d"),
+    weight_loss_results_short[["181-365d"]]$summary_3cat %>% mutate(period = "181-365d")
+  ) %>%
+    mutate(
+      period = factor(period, levels = c("1-30d", "31-90d", "91-180d", "181-365d")),
+      weight_loss_cat3 = factor(weight_loss_cat3,
+                                levels = c("< 5% loss", "5-10% loss", "> 10% loss"))
+    )
+
+  # Steps change plot
+  p_steps_3cat_short <- ggplot(activity_by_weight_3cat_short,
+                                aes(x = period, y = mean_steps_change, fill = weight_loss_cat3)) +
+    geom_bar(stat = "identity", position = position_dodge(width = 0.8), width = 0.7) +
+    geom_errorbar(aes(ymin = mean_steps_change - sd_steps_change,
+                      ymax = mean_steps_change + sd_steps_change),
+                  position = position_dodge(width = 0.8), width = 0.2) +
+    geom_text(aes(label = sprintf("n=%d", n)),
+              position = position_dodge(width = 0.8),
+              vjust = -0.5, size = 2.5) +
+    geom_hline(yintercept = 0, linetype = "dashed", color = "gray50") +
+    scale_fill_manual(
+      values = c("< 5% loss" = "#E74C3C",
+                 "5-10% loss" = "#F39C12",
+                 "> 10% loss" = "#27AE60"),
+      name = "Weight Loss Category"
+    ) +
+    labs(
+      title = "A. Steps Change by Weight Loss Category",
+      subtitle = "< 5%, 5-10%, > 10% weight loss (Short Periods)",
+      x = "Period",
+      y = "Steps Change from Baseline (mean ± SD)"
+    ) +
+    theme_minimal(base_size = 12) +
+    theme(
+      legend.position = "bottom",
+      plot.title = element_text(face = "bold"),
+      panel.grid.minor = element_blank(),
+      axis.text.x = element_text(angle = 0)
+    )
+
+  # Calories change plot
+  p_calories_3cat_short <- ggplot(activity_by_weight_3cat_short,
+                                   aes(x = period, y = mean_calories_change, fill = weight_loss_cat3)) +
+    geom_bar(stat = "identity", position = position_dodge(width = 0.8), width = 0.7) +
+    geom_errorbar(aes(ymin = mean_calories_change - sd_calories_change,
+                      ymax = mean_calories_change + sd_calories_change),
+                  position = position_dodge(width = 0.8), width = 0.2) +
+    geom_text(aes(label = sprintf("n=%d", n)),
+              position = position_dodge(width = 0.8),
+              vjust = -0.5, size = 2.5) +
+    geom_hline(yintercept = 0, linetype = "dashed", color = "gray50") +
+    scale_fill_manual(
+      values = c("< 5% loss" = "#E74C3C",
+                 "5-10% loss" = "#F39C12",
+                 "> 10% loss" = "#27AE60"),
+      name = "Weight Loss Category"
+    ) +
+    labs(
+      title = "B. Calories Change by Weight Loss Category",
+      subtitle = "< 5%, 5-10%, > 10% weight loss (Short Periods)",
+      x = "Period",
+      y = "Calories Change from Baseline (mean ± SD)"
+    ) +
+    theme_minimal(base_size = 12) +
+    theme(
+      legend.position = "bottom",
+      plot.title = element_text(face = "bold"),
+      panel.grid.minor = element_blank(),
+      axis.text.x = element_text(angle = 0)
+    )
+
+  fig11 <- p_steps_3cat_short / p_calories_3cat_short +
+    plot_annotation(
+      title = "Activity Changes by Weight Loss Category (3-Category, Short Periods)",
+      theme = theme(plot.title = element_text(face = "bold", size = 16))
+    )
+
+  ggsave("sensitivity_figure11_activity_by_weightloss_3cat_short.png", fig11,
+         width = 11, height = 10, dpi = 300, bg = "white")
+
+  cat("  ✓ sensitivity_figure11_activity_by_weightloss_3cat_short.png\n\n")
+
+  # =============================================================================
+  # FIGURE 12: WEIGHT CHANGE BY STEP CHANGE CATEGORY (SHORT)
+  # =============================================================================
+
+  cat("### CREATING FIGURE 12: Weight Change by Step Change Category (Short) ###\n\n")
+
+  # Combine all periods for step change analysis
+  weight_by_steps_short <- bind_rows(
+    step_change_results_short[["1-30d"]]$summary %>% mutate(period = "1-30d"),
+    step_change_results_short[["31-90d"]]$summary %>% mutate(period = "31-90d"),
+    step_change_results_short[["91-180d"]]$summary %>% mutate(period = "91-180d"),
+    step_change_results_short[["181-365d"]]$summary %>% mutate(period = "181-365d")
+  ) %>%
+    mutate(
+      period = factor(period, levels = c("1-30d", "31-90d", "91-180d", "181-365d")),
+      step_change_cat = factor(step_change_cat,
+                               levels = c("Decreased > 5%", "No change", "Increased > 5%"))
+    )
+
+  fig12 <- ggplot(weight_by_steps_short,
+                  aes(x = period, y = mean_weight_change, fill = step_change_cat)) +
+    geom_bar(stat = "identity", position = position_dodge(width = 0.8), width = 0.7) +
+    geom_errorbar(aes(ymin = mean_weight_change - sd_weight_change,
+                      ymax = mean_weight_change + sd_weight_change),
+                  position = position_dodge(width = 0.8), width = 0.25) +
+    geom_text(aes(label = sprintf("n=%d", n)),
+              position = position_dodge(width = 0.8),
+              vjust = -0.5, size = 2.8) +
+    geom_hline(yintercept = 0, linetype = "dashed", color = "gray50") +
+    scale_fill_manual(
+      values = c("Decreased > 5%" = "#E74C3C",
+                 "No change" = "#95A5A6",
+                 "Increased > 5%" = "#27AE60"),
+      name = "Step Change Category"
+    ) +
+    labs(
+      title = "Weight Change by Step Change Category (Short Periods)",
+      subtitle = "Comparison across short periods including early response (1-30d)",
+      x = "Period",
+      y = "Weight Change from Baseline (kg, mean ± SD)"
+    ) +
+    theme_minimal(base_size = 14) +
+    theme(
+      legend.position = "bottom",
+      plot.title = element_text(face = "bold", size = 16),
+      panel.grid.minor = element_blank()
+    )
+
+  ggsave("sensitivity_figure12_weight_by_stepchange_short.png", fig12,
+         width = 11, height = 7, dpi = 300, bg = "white")
+
+  cat("  ✓ sensitivity_figure12_weight_by_stepchange_short.png\n\n")
+
+  cat("=============================================================================\n")
+  cat("SHORT PERIODS SENSITIVITY COMPARISON PLOTS COMPLETE\n")
+  cat("=============================================================================\n\n")
+
+} else {
+  cat("\n\nShort periods sensitivity results not found.\n")
+  cat("Run sensitivity_analysis.R first.\n\n")
+}
+
 cat("\n=============================================================================\n")
 cat("ALL SENSITIVITY VISUALIZATIONS COMPLETE\n")
 cat("=============================================================================\n")
