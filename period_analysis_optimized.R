@@ -53,8 +53,12 @@ baseline_windows <- list(
   "180d" = c(-180, 0)
 )
 
-# First, get 1-90d period data (activity + weight + active treatment)
-cat("Step 1: Identifying patients with 1-90d period data...\n")
+# CRITICAL REQUIREMENT CLARIFICATION:
+# - Baseline: MUST have weight + activity
+# - Follow-up: MUST have activity + active treatment (weight is OPTIONAL)
+
+# First, get 1-90d period data (activity + active treatment, NO weight requirement)
+cat("Step 1: Identifying patients with 1-90d activity data + active treatment...\n")
 
 period_1_90d_activity <- activity_with_glp1 %>%
   filter(person_id %in% eligible_person_ids,
@@ -74,6 +78,7 @@ period_1_90d_activity <- activity_with_glp1 %>%
     .groups = "drop"
   )
 
+# Get 1-90d weight separately (OPTIONAL - for those who have it)
 period_1_90d_weight <- weight_with_glp1 %>%
   filter(person_id %in% eligible_person_ids,
          days_from_initiation >= 1,
@@ -82,19 +87,15 @@ period_1_90d_weight <- weight_with_glp1 %>%
   group_by(person_id) %>%
   summarize(period_weight = min(weight_kg, na.rm = TRUE), .groups = "drop")
 
-# Combine activity + weight for 1-90d (require BOTH)
-period_1_90d_combined <- period_1_90d_activity %>%
-  inner_join(period_1_90d_weight, by = "person_id")
-
 # Check active treatment at midpoint (day 45)
 patients_with_multiple_fills <- drug_glp1_clean %>%
-  filter(person_id %in% period_1_90d_combined$person_id) %>%
+  filter(person_id %in% period_1_90d_activity$person_id) %>%
   group_by(person_id) %>%
   summarize(n_fills = n_distinct(drug_start_date), .groups = "drop") %>%
   filter(n_fills >= 2) %>%
   select(person_id)
 
-active_treatment_1_90d <- period_1_90d_combined %>%
+active_treatment_1_90d <- period_1_90d_activity %>%
   select(person_id) %>%
   inner_join(patients_with_multiple_fills, by = "person_id") %>%
   left_join(glp1_initiation %>% select(person_id, glp1_initiation_date), by = "person_id") %>%
@@ -112,15 +113,17 @@ active_treatment_1_90d <- period_1_90d_combined %>%
   filter(has_active_rx) %>%
   select(person_id)
 
-# Final 1-90d data with active treatment
-period_1_90d_final <- period_1_90d_combined %>%
-  inner_join(active_treatment_1_90d, by = "person_id")
+# Final 1-90d data with active treatment (activity required, weight optional)
+period_1_90d_final <- period_1_90d_activity %>%
+  inner_join(active_treatment_1_90d, by = "person_id") %>%
+  left_join(period_1_90d_weight, by = "person_id")  # LEFT JOIN - weight optional
 
 patients_with_1_90d <- period_1_90d_final$person_id
-cat(sprintf("  Patients with 1-90d data (activity + weight + active treatment): %d\n\n", length(patients_with_1_90d)))
+cat(sprintf("  Patients with 1-90d activity + active treatment: %d\n\n", length(patients_with_1_90d)))
 
 # Now evaluate baseline windows ONLY for patients who have 1-90d data
-cat("Step 2: Evaluating baseline windows for these patients...\n\n")
+# BASELINE REQUIRES: weight + activity (both mandatory)
+cat("Step 2: Evaluating baseline windows for these patients (weight + activity required)...\n\n")
 
 baseline_evaluations <- list()
 
@@ -277,7 +280,7 @@ for (period_name in names(time_periods)) {
       .groups = "drop"
     )
 
-  # Weight data - LOWEST weight
+  # Weight data - LOWEST weight (OPTIONAL)
   weight_period <- weight_with_glp1 %>%
     filter(person_id %in% final_cohort_ids,
            days_from_initiation >= start_day,
@@ -286,19 +289,18 @@ for (period_name in names(time_periods)) {
     group_by(person_id) %>%
     summarize(period_weight = min(weight_kg, na.rm = TRUE), .groups = "drop")
 
-  # Check active treatment at midpoint
-  all_patients <- unique(c(activity_period$person_id, weight_period$person_id))
-
+  # Check active treatment at midpoint (for patients with activity data)
   # Require ≥2 prescription fills
   patients_with_multiple_fills <- drug_glp1_clean %>%
-    filter(person_id %in% all_patients) %>%
+    filter(person_id %in% activity_period$person_id) %>%
     group_by(person_id) %>%
     summarize(n_fills = n_distinct(drug_start_date), .groups = "drop") %>%
     filter(n_fills >= 2) %>%
     select(person_id)
 
   # Check prescription within 90 days of midpoint
-  active_treatment_status <- tibble(person_id = all_patients) %>%
+  active_treatment_status <- activity_period %>%
+    select(person_id) %>%
     inner_join(patients_with_multiple_fills, by = "person_id") %>%
     left_join(glp1_initiation %>% select(person_id, glp1_initiation_date), by = "person_id") %>%
     mutate(
@@ -315,10 +317,10 @@ for (period_name in names(time_periods)) {
     filter(has_active_rx) %>%
     select(person_id)
 
-  # Combine and filter to active treatment only
+  # Combine: activity (required) + weight (optional) + active treatment (required)
   period_combined <- activity_period %>%
-    full_join(weight_period, by = "person_id") %>%
     inner_join(active_treatment_status, by = "person_id") %>%
+    left_join(weight_period, by = "person_id") %>%
     mutate(period = period_name)
 
   period_data_list[[period_name]] <- period_combined
@@ -447,43 +449,54 @@ for (pname in names(period_data_list)) {
   period_df <- period_data_list[[pname]]
   period_range <- time_periods[[pname]]
 
-  # Merge with baseline for paired analysis
-  merged <- baseline_data %>%
-    inner_join(period_df, by = "person_id") %>%
+  # Merge with baseline for paired analysis (all patients in matched cohort)
+  merged_activity <- baseline_data %>%
+    inner_join(period_df, by = "person_id")
+
+  # For weight: only those with weight data at both timepoints
+  merged_weight <- merged_activity %>%
     filter(!is.na(baseline_weight), !is.na(period_weight))
 
-  n_paired <- nrow(merged)
+  n_paired_weight <- nrow(merged_weight)
+  n_paired_activity <- nrow(merged_activity)
 
-  if (n_paired >= 10) {
-    # Paired t-tests
-    weight_test <- t.test(merged$period_weight, merged$baseline_weight, paired = TRUE)
-    steps_test <- t.test(merged$period_steps, merged$baseline_steps, paired = TRUE)
-    sedentary_test <- t.test(merged$period_sedentary, merged$baseline_sedentary, paired = TRUE)
-    light_test <- t.test(merged$period_light, merged$baseline_light, paired = TRUE)
-    fairly_test <- t.test(merged$period_fairly, merged$baseline_fairly, paired = TRUE)
-    very_test <- t.test(merged$period_very, merged$baseline_very, paired = TRUE)
-    calories_test <- t.test(merged$period_calories, merged$baseline_calories, paired = TRUE)
+  # Weight test (if enough paired data)
+  weight_test_p <- NA
+  if (n_paired_weight >= 10) {
+    weight_test <- t.test(merged_weight$period_weight, merged_weight$baseline_weight, paired = TRUE)
+    weight_test_p <- weight_test$p.value
+  }
+
+  # Activity tests (all matched cohort)
+  if (n_paired_activity >= 10) {
+    steps_test <- t.test(merged_activity$period_steps, merged_activity$baseline_steps, paired = TRUE)
+    sedentary_test <- t.test(merged_activity$period_sedentary, merged_activity$baseline_sedentary, paired = TRUE)
+    light_test <- t.test(merged_activity$period_light, merged_activity$baseline_light, paired = TRUE)
+    fairly_test <- t.test(merged_activity$period_fairly, merged_activity$baseline_fairly, paired = TRUE)
+    very_test <- t.test(merged_activity$period_very, merged_activity$baseline_very, paired = TRUE)
+    calories_test <- t.test(merged_activity$period_calories, merged_activity$baseline_calories, paired = TRUE)
 
     results_list[[pname]] <- tibble(
       Timepoint = pname,
       Days = sprintf("%d to %d", period_range[1], period_range[2]),
       N = nrow(period_df),
-      Weight_mean = mean(merged$period_weight),
-      Weight_sd = sd(merged$period_weight),
-      Steps_mean = mean(merged$period_steps),
-      Steps_sd = sd(merged$period_steps),
-      Sedentary_mean = mean(merged$period_sedentary),
-      Sedentary_sd = sd(merged$period_sedentary),
-      Light_mean = mean(merged$period_light),
-      Light_sd = sd(merged$period_light),
-      Fairly_mean = mean(merged$period_fairly),
-      Fairly_sd = sd(merged$period_fairly),
-      Very_mean = mean(merged$period_very),
-      Very_sd = sd(merged$period_very),
-      Calories_mean = mean(merged$period_calories),
-      Calories_sd = sd(merged$period_calories),
-      N_paired = n_paired,
-      Weight_p = weight_test$p.value,
+      Weight_mean = mean(merged_weight$period_weight, na.rm = TRUE),
+      Weight_sd = sd(merged_weight$period_weight, na.rm = TRUE),
+      Steps_mean = mean(merged_activity$period_steps, na.rm = TRUE),
+      Steps_sd = sd(merged_activity$period_steps, na.rm = TRUE),
+      Sedentary_mean = mean(merged_activity$period_sedentary, na.rm = TRUE),
+      Sedentary_sd = sd(merged_activity$period_sedentary, na.rm = TRUE),
+      Light_mean = mean(merged_activity$period_light, na.rm = TRUE),
+      Light_sd = sd(merged_activity$period_light, na.rm = TRUE),
+      Fairly_mean = mean(merged_activity$period_fairly, na.rm = TRUE),
+      Fairly_sd = sd(merged_activity$period_fairly, na.rm = TRUE),
+      Very_mean = mean(merged_activity$period_very, na.rm = TRUE),
+      Very_sd = sd(merged_activity$period_very, na.rm = TRUE),
+      Calories_mean = mean(merged_activity$period_calories, na.rm = TRUE),
+      Calories_sd = sd(merged_activity$period_calories, na.rm = TRUE),
+      N_paired = n_paired_activity,
+      N_paired_weight = n_paired_weight,
+      Weight_p = weight_test_p,
       Steps_p = steps_test$p.value,
       Sedentary_p = sedentary_test$p.value,
       Light_p = light_test$p.value,
@@ -495,44 +508,55 @@ for (pname in names(period_data_list)) {
 }
 
 # Process nadir
-merged_nadir <- baseline_data %>%
-  inner_join(nadir_data, by = "person_id") %>%
+merged_nadir_activity <- baseline_data %>%
+  inner_join(nadir_data, by = "person_id")
+
+merged_nadir_weight <- merged_nadir_activity %>%
   filter(!is.na(baseline_weight), !is.na(nadir_weight))
 
-n_paired_nadir <- nrow(merged_nadir)
+n_paired_nadir_weight <- nrow(merged_nadir_weight)
+n_paired_nadir_activity <- nrow(merged_nadir_activity)
 
-if (n_paired_nadir >= 10) {
-  weight_test <- t.test(merged_nadir$nadir_weight, merged_nadir$baseline_weight, paired = TRUE)
-  steps_test <- t.test(merged_nadir$nadir_steps, merged_nadir$baseline_steps, paired = TRUE)
-  sedentary_test <- t.test(merged_nadir$nadir_sedentary, merged_nadir$baseline_sedentary, paired = TRUE)
-  light_test <- t.test(merged_nadir$nadir_light, merged_nadir$baseline_light, paired = TRUE)
-  fairly_test <- t.test(merged_nadir$nadir_fairly, merged_nadir$baseline_fairly, paired = TRUE)
-  very_test <- t.test(merged_nadir$nadir_very, merged_nadir$baseline_very, paired = TRUE)
-  calories_test <- t.test(merged_nadir$nadir_calories, merged_nadir$baseline_calories, paired = TRUE)
+# Weight test (if enough paired data)
+nadir_weight_test_p <- NA
+if (n_paired_nadir_weight >= 10) {
+  weight_test <- t.test(merged_nadir_weight$nadir_weight, merged_nadir_weight$baseline_weight, paired = TRUE)
+  nadir_weight_test_p <- weight_test$p.value
+}
 
-  mean_days_to_nadir <- mean(merged_nadir$days_to_nadir)
-  sd_days_to_nadir <- sd(merged_nadir$days_to_nadir)
+# Activity tests (all matched cohort with nadir data)
+if (n_paired_nadir_activity >= 10) {
+  steps_test <- t.test(merged_nadir_activity$nadir_steps, merged_nadir_activity$baseline_steps, paired = TRUE)
+  sedentary_test <- t.test(merged_nadir_activity$nadir_sedentary, merged_nadir_activity$baseline_sedentary, paired = TRUE)
+  light_test <- t.test(merged_nadir_activity$nadir_light, merged_nadir_activity$baseline_light, paired = TRUE)
+  fairly_test <- t.test(merged_nadir_activity$nadir_fairly, merged_nadir_activity$baseline_fairly, paired = TRUE)
+  very_test <- t.test(merged_nadir_activity$nadir_very, merged_nadir_activity$baseline_very, paired = TRUE)
+  calories_test <- t.test(merged_nadir_activity$nadir_calories, merged_nadir_activity$baseline_calories, paired = TRUE)
+
+  mean_days_to_nadir <- mean(merged_nadir_activity$days_to_nadir)
+  sd_days_to_nadir <- sd(merged_nadir_activity$days_to_nadir)
 
   results_list[["Nadir"]] <- tibble(
     Timepoint = "Nadir",
     Days = sprintf("%.0f ± %.0f", mean_days_to_nadir, sd_days_to_nadir),
     N = nrow(nadir_data),
-    Weight_mean = mean(merged_nadir$nadir_weight),
-    Weight_sd = sd(merged_nadir$nadir_weight),
-    Steps_mean = mean(merged_nadir$nadir_steps),
-    Steps_sd = sd(merged_nadir$nadir_steps),
-    Sedentary_mean = mean(merged_nadir$nadir_sedentary),
-    Sedentary_sd = sd(merged_nadir$nadir_sedentary),
-    Light_mean = mean(merged_nadir$nadir_light),
-    Light_sd = sd(merged_nadir$nadir_light),
-    Fairly_mean = mean(merged_nadir$nadir_fairly),
-    Fairly_sd = sd(merged_nadir$nadir_fairly),
-    Very_mean = mean(merged_nadir$nadir_very),
-    Very_sd = sd(merged_nadir$nadir_very),
-    Calories_mean = mean(merged_nadir$nadir_calories),
-    Calories_sd = sd(merged_nadir$nadir_calories),
-    N_paired = n_paired_nadir,
-    Weight_p = weight_test$p.value,
+    Weight_mean = mean(merged_nadir_weight$nadir_weight, na.rm = TRUE),
+    Weight_sd = sd(merged_nadir_weight$nadir_weight, na.rm = TRUE),
+    Steps_mean = mean(merged_nadir_activity$nadir_steps, na.rm = TRUE),
+    Steps_sd = sd(merged_nadir_activity$nadir_steps, na.rm = TRUE),
+    Sedentary_mean = mean(merged_nadir_activity$nadir_sedentary, na.rm = TRUE),
+    Sedentary_sd = sd(merged_nadir_activity$nadir_sedentary, na.rm = TRUE),
+    Light_mean = mean(merged_nadir_activity$nadir_light, na.rm = TRUE),
+    Light_sd = sd(merged_nadir_activity$nadir_light, na.rm = TRUE),
+    Fairly_mean = mean(merged_nadir_activity$nadir_fairly, na.rm = TRUE),
+    Fairly_sd = sd(merged_nadir_activity$nadir_fairly, na.rm = TRUE),
+    Very_mean = mean(merged_nadir_activity$nadir_very, na.rm = TRUE),
+    Very_sd = sd(merged_nadir_activity$nadir_very, na.rm = TRUE),
+    Calories_mean = mean(merged_nadir_activity$nadir_calories, na.rm = TRUE),
+    Calories_sd = sd(merged_nadir_activity$nadir_calories, na.rm = TRUE),
+    N_paired = n_paired_nadir_activity,
+    N_paired_weight = n_paired_nadir_weight,
+    Weight_p = nadir_weight_test_p,
     Steps_p = steps_test$p.value,
     Sedentary_p = sedentary_test$p.value,
     Light_p = light_test$p.value,

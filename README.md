@@ -631,3 +631,11 @@ For questions about this analysis, please refer to the All of Us Research Progra
   - Fixed missing activity data by ensuring matched cohort throughout
   - All periods now use exact same matched cohort (no more mismatches)
   - Updated all documentation to emphasize matched cohort requirement
+- **v3.4** (2025): Fixed cohort definition and weight p-values:
+  - CRITICAL CLARIFICATION: Baseline requires BOTH weight + activity
+  - Follow-up requires activity + active treatment (weight is OPTIONAL)
+  - This increases cohort size from ~189 to ~260 patients
+  - Fixed weight p-values - now calculated and displayed properly
+  - Separated weight tests (only for patients with weight data) from activity tests (all patients)
+  - Added N_paired_weight to track weight-specific sample sizes
+  - Updated all period calculations to use left join for weight data
