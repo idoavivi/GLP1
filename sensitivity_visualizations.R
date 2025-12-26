@@ -931,8 +931,10 @@ if (file.exists("period_analysis_short_results.RData")) {
   sampled_patients_short <- all_timepoints_short %>%
     group_by(weight_loss_cat) %>%
     distinct(person_id) %>%
-    slice_sample(n = min(30, n())) %>%
-    ungroup()
+    {
+      group_split(.) %>%
+        map_dfr(~ slice_sample(.x, n = min(30, nrow(.x))))
+    }
 
   spaghetti_data_weight_short <- all_timepoints_short %>%
     semi_join(sampled_patients_short, by = c("person_id", "weight_loss_cat"))
