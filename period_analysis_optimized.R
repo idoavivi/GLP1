@@ -29,6 +29,71 @@ if (require(lme4, quietly = TRUE) && require(lmerTest, quietly = TRUE)) {
 eligible_person_ids <- windowed_analysis_results$eligible_patients$person_id
 
 # =============================================================================
+# WEAR TIME PROCESSING (CRITICAL FOR DATA QUALITY)
+# =============================================================================
+
+cat("=============================================================================\n")
+cat("WEAR TIME PROCESSING\n")
+cat("=============================================================================\n\n")
+
+cat("Implementing rigorous wear time criteria for publishable results:\n")
+cat("  - Valid day: ≥10 hours (600 minutes) of wear time\n")
+cat("  - Period requirement: ≥4 valid days (increased from ≥3)\n")
+cat("  - Creating wear-adjusted proportional metrics\n\n")
+
+# Add wear time and proportional metrics to activity data
+activity_with_glp1 <- activity_with_glp1 %>%
+  mutate(
+    # Calculate total wear time (sum of all activity categories)
+    total_wear_minutes = coalesce(sedentary_minutes, 0) +
+                         coalesce(lightly_active_minutes, 0) +
+                         coalesce(fairly_active_minutes, 0) +
+                         coalesce(very_active_minutes, 0),
+
+    # Valid day criterion: ≥600 minutes (10 hours) of wear
+    is_valid_day = total_wear_minutes >= 600,
+
+    # Wear-adjusted proportional metrics (% of wear time)
+    pct_sedentary = if_else(total_wear_minutes > 0,
+                            100 * sedentary_minutes / total_wear_minutes,
+                            NA_real_),
+    pct_light = if_else(total_wear_minutes > 0,
+                        100 * lightly_active_minutes / total_wear_minutes,
+                        NA_real_),
+    pct_fairly = if_else(total_wear_minutes > 0,
+                         100 * fairly_active_minutes / total_wear_minutes,
+                         NA_real_),
+    pct_very = if_else(total_wear_minutes > 0,
+                       100 * very_active_minutes / total_wear_minutes,
+                       NA_real_),
+    pct_MVPA = if_else(total_wear_minutes > 0,
+                       100 * (coalesce(fairly_active_minutes, 0) +
+                              coalesce(very_active_minutes, 0)) / total_wear_minutes,
+                       NA_real_)
+  )
+
+# Report wear time statistics
+total_activity_days <- nrow(activity_with_glp1)
+valid_days <- sum(activity_with_glp1$is_valid_day, na.rm = TRUE)
+wear_time_stats <- activity_with_glp1 %>%
+  summarize(
+    mean_wear = mean(total_wear_minutes, na.rm = TRUE),
+    median_wear = median(total_wear_minutes, na.rm = TRUE),
+    pct_valid = 100 * mean(is_valid_day, na.rm = TRUE)
+  )
+
+cat(sprintf("Total activity days: %d\n", total_activity_days))
+cat(sprintf("Valid days (≥10h wear): %d (%.1f%%)\n",
+            valid_days,
+            100 * valid_days / total_activity_days))
+cat(sprintf("Mean wear time: %.1f minutes (%.1f hours)\n",
+            wear_time_stats$mean_wear,
+            wear_time_stats$mean_wear / 60))
+cat(sprintf("Median wear time: %.1f minutes (%.1f hours)\n\n",
+            wear_time_stats$median_wear,
+            wear_time_stats$median_wear / 60))
+
+# =============================================================================
 # STEP 0: BASELINE SELECTION AND COHORT MATCHING
 # =============================================================================
 
@@ -63,9 +128,10 @@ cat("Step 1: Identifying patients with 1-90d activity data + active treatment...
 period_1_90d_activity <- activity_with_glp1 %>%
   filter(person_id %in% eligible_person_ids,
          days_from_initiation >= 1,
-         days_from_initiation <= 90) %>%
+         days_from_initiation <= 90,
+         is_valid_day == TRUE) %>%  # WEAR TIME: only valid days (≥10h)
   group_by(person_id) %>%
-  filter(n() >= 3) %>%
+  filter(n() >= 4) %>%  # INCREASED FROM 3: require ≥4 valid days
   summarize(
     period_steps = mean(steps, na.rm = TRUE),
     period_sedentary = mean(sedentary_minutes, na.rm = TRUE),
@@ -74,6 +140,13 @@ period_1_90d_activity <- activity_with_glp1 %>%
     period_very = mean(very_active_minutes, na.rm = TRUE),
     period_MVPA = mean(coalesce(fairly_active_minutes, 0) + coalesce(very_active_minutes, 0), na.rm = TRUE),
     period_calories = mean(activity_calories, na.rm = TRUE),
+    # Wear-adjusted proportional metrics
+    period_pct_sedentary = mean(pct_sedentary, na.rm = TRUE),
+    period_pct_light = mean(pct_light, na.rm = TRUE),
+    period_pct_fairly = mean(pct_fairly, na.rm = TRUE),
+    period_pct_very = mean(pct_very, na.rm = TRUE),
+    period_pct_MVPA = mean(pct_MVPA, na.rm = TRUE),
+    period_mean_wear = mean(total_wear_minutes, na.rm = TRUE),
     n_period_days = n(),
     .groups = "drop"
   )
@@ -136,9 +209,10 @@ for (window_name in names(baseline_windows)) {
   baseline_activity <- activity_with_glp1 %>%
     filter(person_id %in% patients_with_1_90d,
            days_from_initiation >= window[1],
-           days_from_initiation <= window[2]) %>%
+           days_from_initiation <= window[2],
+           is_valid_day == TRUE) %>%  # WEAR TIME: only valid days (≥10h)
     group_by(person_id) %>%
-    filter(n() >= 3) %>%
+    filter(n() >= 4) %>%  # INCREASED FROM 3: require ≥4 valid days
     summarize(
       baseline_steps = mean(steps, na.rm = TRUE),
       baseline_sedentary = mean(sedentary_minutes, na.rm = TRUE),
@@ -147,6 +221,13 @@ for (window_name in names(baseline_windows)) {
       baseline_very = mean(very_active_minutes, na.rm = TRUE),
       baseline_MVPA = mean(coalesce(fairly_active_minutes, 0) + coalesce(very_active_minutes, 0), na.rm = TRUE),
       baseline_calories = mean(activity_calories, na.rm = TRUE),
+      # Wear-adjusted proportional metrics
+      baseline_pct_sedentary = mean(pct_sedentary, na.rm = TRUE),
+      baseline_pct_light = mean(pct_light, na.rm = TRUE),
+      baseline_pct_fairly = mean(pct_fairly, na.rm = TRUE),
+      baseline_pct_very = mean(pct_very, na.rm = TRUE),
+      baseline_pct_MVPA = mean(pct_MVPA, na.rm = TRUE),
+      baseline_mean_wear = mean(total_wear_minutes, na.rm = TRUE),
       n_baseline_days = n(),
       .groups = "drop"
     )
