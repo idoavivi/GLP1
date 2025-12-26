@@ -800,6 +800,41 @@ if (require(knitr, quietly = TRUE) && require(kableExtra, quietly = TRUE)) {
 write_csv(all_results, "period_analysis_optimized_detailed.csv")
 cat("  ✓ period_analysis_optimized_detailed.csv\n")
 
+# Create long format data for sensitivity analysis compatibility
+cat("Creating long format data for sensitivity analysis...\n")
+
+baseline_long <- baseline_data %>%
+  select(person_id,
+         weight = baseline_weight,
+         steps = baseline_steps,
+         sedentary = baseline_sedentary,
+         light = baseline_light,
+         fairly = baseline_fairly,
+         very = baseline_very,
+         calories = baseline_calories) %>%
+  mutate(period = "Baseline")
+
+period_long_list <- list()
+for (pname in names(period_data_list)) {
+  period_long_list[[pname]] <- period_data_list[[pname]] %>%
+    select(person_id,
+           weight = period_weight,
+           steps = period_steps,
+           sedentary = period_sedentary,
+           light = period_light,
+           fairly = period_fairly,
+           very = period_very,
+           calories = period_calories) %>%
+    mutate(period = pname)
+}
+
+all_data_long <- bind_rows(baseline_long, bind_rows(period_long_list))
+
+cat(sprintf("  ✓ Long format: %d observations from %d patients, %d periods\n",
+            nrow(all_data_long),
+            n_distinct(all_data_long$person_id),
+            n_distinct(all_data_long$period)))
+
 # Save all data for further analysis
 save(
   baseline_data,
@@ -807,6 +842,7 @@ save(
   nadir_data,
   comprehensive_table,
   all_results,
+  all_data_long,
   baseline_start,
   baseline_end,
   selected_baseline,
@@ -1449,12 +1485,48 @@ if (require(knitr, quietly = TRUE) && require(kableExtra, quietly = TRUE)) {
 write_csv(all_results_short, "period_analysis_short_detailed.csv")
 cat("  ✓ period_analysis_short_detailed.csv\n")
 
+# Create long format data for sensitivity analysis compatibility
+cat("Creating long format data for sensitivity analysis...\n")
+
+baseline_long_short <- baseline_data_short %>%
+  select(person_id,
+         weight = baseline_weight,
+         steps = baseline_steps,
+         sedentary = baseline_sedentary,
+         light = baseline_light,
+         fairly = baseline_fairly,
+         very = baseline_very,
+         calories = baseline_calories) %>%
+  mutate(period = "Baseline")
+
+period_long_list_short <- list()
+for (pname in names(period_data_list_short)) {
+  period_long_list_short[[pname]] <- period_data_list_short[[pname]] %>%
+    select(person_id,
+           weight = period_weight,
+           steps = period_steps,
+           sedentary = period_sedentary,
+           light = period_light,
+           fairly = period_fairly,
+           very = period_very,
+           calories = period_calories) %>%
+    mutate(period = pname)
+}
+
+all_data_long_short <- bind_rows(baseline_long_short, bind_rows(period_long_list_short))
+
+cat(sprintf("  ✓ Long format: %d observations from %d patients, %d periods\n",
+            nrow(all_data_long_short),
+            n_distinct(all_data_long_short$person_id),
+            n_distinct(all_data_long_short$period)))
+
 save(
   baseline_data_short,
   period_data_list_short,
   nadir_data_short,
   comprehensive_table_short,
   all_results_short,
+  all_data_long_short,
   baseline_start_short,
   baseline_end_short,
   selected_baseline_short,
@@ -1465,6 +1537,562 @@ cat("  ✓ period_analysis_short_results.RData\n")
 cat("\n=============================================================================\n")
 cat("SHORT PERIODS ANALYSIS COMPLETE\n")
 cat("=============================================================================\n")
+
+# =============================================================================
+# =============================================================================
+# MIXED EFFECTS MODELS (if lme4/lmerTest available)
+# =============================================================================
+# =============================================================================
+
+if (use_mixed_models) {
+
+  cat("\n\n")
+  cat("=============================================================================\n")
+  cat("=============================================================================\n")
+  cat("MIXED EFFECTS MODELS ANALYSIS\n")
+  cat("=============================================================================\n")
+  cat("=============================================================================\n\n")
+
+  cat("Fitting linear mixed effects models with random intercepts per patient\n")
+  cat("This accounts for correlation between repeated measures\n\n")
+
+  # =============================================================================
+  # MAIN ANALYSIS MIXED EFFECTS (1-90d, 91-180d, 181-365d)
+  # =============================================================================
+
+  cat("=============================================================================\n")
+  cat("MAIN ANALYSIS MIXED EFFECTS: 1-90d, 91-180d, 181-365d\n")
+  cat("=============================================================================\n\n")
+
+  # Reshape to long format for mixed effects
+  # Include all patients with baseline data
+  long_data_main <- baseline_data %>%
+    select(person_id,
+           baseline_weight, baseline_steps, baseline_sedentary,
+           baseline_light, baseline_fairly, baseline_very, baseline_calories) %>%
+    mutate(period = "Baseline") %>%
+    rename(weight = baseline_weight,
+           steps = baseline_steps,
+           sedentary = baseline_sedentary,
+           light = baseline_light,
+           fairly = baseline_fairly,
+           very = baseline_very,
+           calories = baseline_calories)
+
+  # Add each follow-up period
+  for (pname in names(period_data_list)) {
+    period_long <- period_data_list[[pname]] %>%
+      select(person_id,
+             period_weight, period_steps, period_sedentary,
+             period_light, period_fairly, period_very, period_calories) %>%
+      mutate(period = pname) %>%
+      rename(weight = period_weight,
+             steps = period_steps,
+             sedentary = period_sedentary,
+             light = period_light,
+             fairly = period_fairly,
+             very = period_very,
+             calories = period_calories)
+
+    long_data_main <- bind_rows(long_data_main, period_long)
+  }
+
+  # Convert period to factor with baseline as reference
+  long_data_main <- long_data_main %>%
+    mutate(period = factor(period, levels = c("Baseline", names(period_data_list))))
+
+  cat(sprintf("Data reshaped: %d observations from %d patients\n\n",
+              nrow(long_data_main), n_distinct(long_data_main$person_id)))
+
+  # Fit mixed effects models for each outcome
+  mixed_results_main <- list()
+
+  # Weight model
+  cat("Fitting weight model...\n")
+  weight_data <- long_data_main %>% filter(!is.na(weight))
+  if (n_distinct(weight_data$person_id) >= 10) {
+    tryCatch({
+      weight_lmer <- lmer(weight ~ period + (1|person_id), data = weight_data)
+      weight_summary <- summary(weight_lmer)
+      mixed_results_main$weight <- list(
+        model = weight_lmer,
+        summary = weight_summary,
+        n_obs = nrow(weight_data),
+        n_patients = n_distinct(weight_data$person_id)
+      )
+      cat(sprintf("  ✓ N=%d observations, %d patients\n",
+                  nrow(weight_data), n_distinct(weight_data$person_id)))
+    }, error = function(e) {
+      cat(sprintf("  ✗ Failed: %s\n", e$message))
+      mixed_results_main$weight <- NULL
+    })
+  } else {
+    cat("  ✗ Insufficient data\n")
+    mixed_results_main$weight <- NULL
+  }
+
+  # Steps model
+  cat("Fitting steps model...\n")
+  steps_data <- long_data_main %>% filter(!is.na(steps))
+  if (n_distinct(steps_data$person_id) >= 10) {
+    tryCatch({
+      steps_lmer <- lmer(steps ~ period + (1|person_id), data = steps_data)
+      steps_summary <- summary(steps_lmer)
+      mixed_results_main$steps <- list(
+        model = steps_lmer,
+        summary = steps_summary,
+        n_obs = nrow(steps_data),
+        n_patients = n_distinct(steps_data$person_id)
+      )
+      cat(sprintf("  ✓ N=%d observations, %d patients\n",
+                  nrow(steps_data), n_distinct(steps_data$person_id)))
+    }, error = function(e) {
+      cat(sprintf("  ✗ Failed: %s\n", e$message))
+      mixed_results_main$steps <- NULL
+    })
+  } else {
+    cat("  ✗ Insufficient data\n")
+    mixed_results_main$steps <- NULL
+  }
+
+  # Sedentary model
+  cat("Fitting sedentary minutes model...\n")
+  sedentary_data <- long_data_main %>% filter(!is.na(sedentary))
+  if (n_distinct(sedentary_data$person_id) >= 10) {
+    tryCatch({
+      sedentary_lmer <- lmer(sedentary ~ period + (1|person_id), data = sedentary_data)
+      sedentary_summary <- summary(sedentary_lmer)
+      mixed_results_main$sedentary <- list(
+        model = sedentary_lmer,
+        summary = sedentary_summary,
+        n_obs = nrow(sedentary_data),
+        n_patients = n_distinct(sedentary_data$person_id)
+      )
+      cat(sprintf("  ✓ N=%d observations, %d patients\n",
+                  nrow(sedentary_data), n_distinct(sedentary_data$person_id)))
+    }, error = function(e) {
+      cat(sprintf("  ✗ Failed: %s\n", e$message))
+      mixed_results_main$sedentary <- NULL
+    })
+  } else {
+    cat("  ✗ Insufficient data\n")
+    mixed_results_main$sedentary <- NULL
+  }
+
+  # Light activity model
+  cat("Fitting light activity model...\n")
+  light_data <- long_data_main %>% filter(!is.na(light))
+  if (n_distinct(light_data$person_id) >= 10) {
+    tryCatch({
+      light_lmer <- lmer(light ~ period + (1|person_id), data = light_data)
+      light_summary <- summary(light_lmer)
+      mixed_results_main$light <- list(
+        model = light_lmer,
+        summary = light_summary,
+        n_obs = nrow(light_data),
+        n_patients = n_distinct(light_data$person_id)
+      )
+      cat(sprintf("  ✓ N=%d observations, %d patients\n",
+                  nrow(light_data), n_distinct(light_data$person_id)))
+    }, error = function(e) {
+      cat(sprintf("  ✗ Failed: %s\n", e$message))
+      mixed_results_main$light <- NULL
+    })
+  } else {
+    cat("  ✗ Insufficient data\n")
+    mixed_results_main$light <- NULL
+  }
+
+  # Fairly active model
+  cat("Fitting fairly active model...\n")
+  fairly_data <- long_data_main %>% filter(!is.na(fairly))
+  if (n_distinct(fairly_data$person_id) >= 10) {
+    tryCatch({
+      fairly_lmer <- lmer(fairly ~ period + (1|person_id), data = fairly_data)
+      fairly_summary <- summary(fairly_lmer)
+      mixed_results_main$fairly <- list(
+        model = fairly_lmer,
+        summary = fairly_summary,
+        n_obs = nrow(fairly_data),
+        n_patients = n_distinct(fairly_data$person_id)
+      )
+      cat(sprintf("  ✓ N=%d observations, %d patients\n",
+                  nrow(fairly_data), n_distinct(fairly_data$person_id)))
+    }, error = function(e) {
+      cat(sprintf("  ✗ Failed: %s\n", e$message))
+      mixed_results_main$fairly <- NULL
+    })
+  } else {
+    cat("  ✗ Insufficient data\n")
+    mixed_results_main$fairly <- NULL
+  }
+
+  # Very active model
+  cat("Fitting very active model...\n")
+  very_data <- long_data_main %>% filter(!is.na(very))
+  if (n_distinct(very_data$person_id) >= 10) {
+    tryCatch({
+      very_lmer <- lmer(very ~ period + (1|person_id), data = very_data)
+      very_summary <- summary(very_lmer)
+      mixed_results_main$very <- list(
+        model = very_lmer,
+        summary = very_summary,
+        n_obs = nrow(very_data),
+        n_patients = n_distinct(very_data$person_id)
+      )
+      cat(sprintf("  ✓ N=%d observations, %d patients\n",
+                  nrow(very_data), n_distinct(very_data$person_id)))
+    }, error = function(e) {
+      cat(sprintf("  ✗ Failed: %s\n", e$message))
+      mixed_results_main$very <- NULL
+    })
+  } else {
+    cat("  ✗ Insufficient data\n")
+    mixed_results_main$very <- NULL
+  }
+
+  # Calories model
+  cat("Fitting calories model...\n")
+  calories_data <- long_data_main %>% filter(!is.na(calories))
+  if (n_distinct(calories_data$person_id) >= 10) {
+    tryCatch({
+      calories_lmer <- lmer(calories ~ period + (1|person_id), data = calories_data)
+      calories_summary <- summary(calories_lmer)
+      mixed_results_main$calories <- list(
+        model = calories_lmer,
+        summary = calories_summary,
+        n_obs = nrow(calories_data),
+        n_patients = n_distinct(calories_data$person_id)
+      )
+      cat(sprintf("  ✓ N=%d observations, %d patients\n",
+                  nrow(calories_data), n_distinct(calories_data$person_id)))
+    }, error = function(e) {
+      cat(sprintf("  ✗ Failed: %s\n", e$message))
+      mixed_results_main$calories <- NULL
+    })
+  } else {
+    cat("  ✗ Insufficient data\n")
+    mixed_results_main$calories <- NULL
+  }
+
+  cat("\n")
+
+  # Create summary table of mixed effects results
+  mixed_effects_table_main <- tibble()
+
+  for (outcome_name in names(mixed_results_main)) {
+    if (!is.null(mixed_results_main[[outcome_name]])) {
+      coef_table <- coef(summary(mixed_results_main[[outcome_name]]$model))
+
+      # Extract coefficients for each period (skip intercept)
+      for (i in 2:nrow(coef_table)) {
+        period_name <- rownames(coef_table)[i]
+        period_name <- gsub("period", "", period_name)
+
+        mixed_effects_table_main <- bind_rows(
+          mixed_effects_table_main,
+          tibble(
+            Outcome = outcome_name,
+            Period = period_name,
+            Estimate = coef_table[i, "Estimate"],
+            SE = coef_table[i, "Std. Error"],
+            t_value = coef_table[i, "t value"],
+            p_value = coef_table[i, "Pr(>|t|)"],
+            N_obs = mixed_results_main[[outcome_name]]$n_obs,
+            N_patients = mixed_results_main[[outcome_name]]$n_patients
+          )
+        )
+      }
+    }
+  }
+
+  # Save mixed effects results
+  write_csv(mixed_effects_table_main, "period_analysis_mixed_effects_main.csv")
+  cat("  ✓ period_analysis_mixed_effects_main.csv\n\n")
+
+  # =============================================================================
+  # SHORT PERIODS MIXED EFFECTS (1-30d, 31-90d, 91-180d, 181-365d)
+  # =============================================================================
+
+  cat("=============================================================================\n")
+  cat("SHORT PERIODS MIXED EFFECTS: 1-30d, 31-90d, 91-180d, 181-365d\n")
+  cat("=============================================================================\n\n")
+
+  # Reshape to long format for mixed effects
+  long_data_short <- baseline_data_short %>%
+    select(person_id,
+           baseline_weight, baseline_steps, baseline_sedentary,
+           baseline_light, baseline_fairly, baseline_very, baseline_calories) %>%
+    mutate(period = "Baseline") %>%
+    rename(weight = baseline_weight,
+           steps = baseline_steps,
+           sedentary = baseline_sedentary,
+           light = baseline_light,
+           fairly = baseline_fairly,
+           very = baseline_very,
+           calories = baseline_calories)
+
+  # Add each follow-up period
+  for (pname in names(period_data_list_short)) {
+    period_long <- period_data_list_short[[pname]] %>%
+      select(person_id,
+             period_weight, period_steps, period_sedentary,
+             period_light, period_fairly, period_very, period_calories) %>%
+      mutate(period = pname) %>%
+      rename(weight = period_weight,
+             steps = period_steps,
+             sedentary = period_sedentary,
+             light = period_light,
+             fairly = period_fairly,
+             very = period_very,
+             calories = period_calories)
+
+    long_data_short <- bind_rows(long_data_short, period_long)
+  }
+
+  # Convert period to factor with baseline as reference
+  long_data_short <- long_data_short %>%
+    mutate(period = factor(period, levels = c("Baseline", names(period_data_list_short))))
+
+  cat(sprintf("Data reshaped: %d observations from %d patients\n\n",
+              nrow(long_data_short), n_distinct(long_data_short$person_id)))
+
+  # Fit mixed effects models for each outcome
+  mixed_results_short <- list()
+
+  # Weight model
+  cat("Fitting weight model...\n")
+  weight_data <- long_data_short %>% filter(!is.na(weight))
+  if (n_distinct(weight_data$person_id) >= 10) {
+    tryCatch({
+      weight_lmer <- lmer(weight ~ period + (1|person_id), data = weight_data)
+      weight_summary <- summary(weight_lmer)
+      mixed_results_short$weight <- list(
+        model = weight_lmer,
+        summary = weight_summary,
+        n_obs = nrow(weight_data),
+        n_patients = n_distinct(weight_data$person_id)
+      )
+      cat(sprintf("  ✓ N=%d observations, %d patients\n",
+                  nrow(weight_data), n_distinct(weight_data$person_id)))
+    }, error = function(e) {
+      cat(sprintf("  ✗ Failed: %s\n", e$message))
+      mixed_results_short$weight <- NULL
+    })
+  } else {
+    cat("  ✗ Insufficient data\n")
+    mixed_results_short$weight <- NULL
+  }
+
+  # Steps model
+  cat("Fitting steps model...\n")
+  steps_data <- long_data_short %>% filter(!is.na(steps))
+  if (n_distinct(steps_data$person_id) >= 10) {
+    tryCatch({
+      steps_lmer <- lmer(steps ~ period + (1|person_id), data = steps_data)
+      steps_summary <- summary(steps_lmer)
+      mixed_results_short$steps <- list(
+        model = steps_lmer,
+        summary = steps_summary,
+        n_obs = nrow(steps_data),
+        n_patients = n_distinct(steps_data$person_id)
+      )
+      cat(sprintf("  ✓ N=%d observations, %d patients\n",
+                  nrow(steps_data), n_distinct(steps_data$person_id)))
+    }, error = function(e) {
+      cat(sprintf("  ✗ Failed: %s\n", e$message))
+      mixed_results_short$steps <- NULL
+    })
+  } else {
+    cat("  ✗ Insufficient data\n")
+    mixed_results_short$steps <- NULL
+  }
+
+  # Sedentary model
+  cat("Fitting sedentary minutes model...\n")
+  sedentary_data <- long_data_short %>% filter(!is.na(sedentary))
+  if (n_distinct(sedentary_data$person_id) >= 10) {
+    tryCatch({
+      sedentary_lmer <- lmer(sedentary ~ period + (1|person_id), data = sedentary_data)
+      sedentary_summary <- summary(sedentary_lmer)
+      mixed_results_short$sedentary <- list(
+        model = sedentary_lmer,
+        summary = sedentary_summary,
+        n_obs = nrow(sedentary_data),
+        n_patients = n_distinct(sedentary_data$person_id)
+      )
+      cat(sprintf("  ✓ N=%d observations, %d patients\n",
+                  nrow(sedentary_data), n_distinct(sedentary_data$person_id)))
+    }, error = function(e) {
+      cat(sprintf("  ✗ Failed: %s\n", e$message))
+      mixed_results_short$sedentary <- NULL
+    })
+  } else {
+    cat("  ✗ Insufficient data\n")
+    mixed_results_short$sedentary <- NULL
+  }
+
+  # Light activity model
+  cat("Fitting light activity model...\n")
+  light_data <- long_data_short %>% filter(!is.na(light))
+  if (n_distinct(light_data$person_id) >= 10) {
+    tryCatch({
+      light_lmer <- lmer(light ~ period + (1|person_id), data = light_data)
+      light_summary <- summary(light_lmer)
+      mixed_results_short$light <- list(
+        model = light_lmer,
+        summary = light_summary,
+        n_obs = nrow(light_data),
+        n_patients = n_distinct(light_data$person_id)
+      )
+      cat(sprintf("  ✓ N=%d observations, %d patients\n",
+                  nrow(light_data), n_distinct(light_data$person_id)))
+    }, error = function(e) {
+      cat(sprintf("  ✗ Failed: %s\n", e$message))
+      mixed_results_short$light <- NULL
+    })
+  } else {
+    cat("  ✗ Insufficient data\n")
+    mixed_results_short$light <- NULL
+  }
+
+  # Fairly active model
+  cat("Fitting fairly active model...\n")
+  fairly_data <- long_data_short %>% filter(!is.na(fairly))
+  if (n_distinct(fairly_data$person_id) >= 10) {
+    tryCatch({
+      fairly_lmer <- lmer(fairly ~ period + (1|person_id), data = fairly_data)
+      fairly_summary <- summary(fairly_lmer)
+      mixed_results_short$fairly <- list(
+        model = fairly_lmer,
+        summary = fairly_summary,
+        n_obs = nrow(fairly_data),
+        n_patients = n_distinct(fairly_data$person_id)
+      )
+      cat(sprintf("  ✓ N=%d observations, %d patients\n",
+                  nrow(fairly_data), n_distinct(fairly_data$person_id)))
+    }, error = function(e) {
+      cat(sprintf("  ✗ Failed: %s\n", e$message))
+      mixed_results_short$fairly <- NULL
+    })
+  } else {
+    cat("  ✗ Insufficient data\n")
+    mixed_results_short$fairly <- NULL
+  }
+
+  # Very active model
+  cat("Fitting very active model...\n")
+  very_data <- long_data_short %>% filter(!is.na(very))
+  if (n_distinct(very_data$person_id) >= 10) {
+    tryCatch({
+      very_lmer <- lmer(very ~ period + (1|person_id), data = very_data)
+      very_summary <- summary(very_lmer)
+      mixed_results_short$very <- list(
+        model = very_lmer,
+        summary = very_summary,
+        n_obs = nrow(very_data),
+        n_patients = n_distinct(very_data$person_id)
+      )
+      cat(sprintf("  ✓ N=%d observations, %d patients\n",
+                  nrow(very_data), n_distinct(very_data$person_id)))
+    }, error = function(e) {
+      cat(sprintf("  ✗ Failed: %s\n", e$message))
+      mixed_results_short$very <- NULL
+    })
+  } else {
+    cat("  ✗ Insufficient data\n")
+    mixed_results_short$very <- NULL
+  }
+
+  # Calories model
+  cat("Fitting calories model...\n")
+  calories_data <- long_data_short %>% filter(!is.na(calories))
+  if (n_distinct(calories_data$person_id) >= 10) {
+    tryCatch({
+      calories_lmer <- lmer(calories ~ period + (1|person_id), data = calories_data)
+      calories_summary <- summary(calories_lmer)
+      mixed_results_short$calories <- list(
+        model = calories_lmer,
+        summary = calories_summary,
+        n_obs = nrow(calories_data),
+        n_patients = n_distinct(calories_data$person_id)
+      )
+      cat(sprintf("  ✓ N=%d observations, %d patients\n",
+                  nrow(calories_data), n_distinct(calories_data$person_id)))
+    }, error = function(e) {
+      cat(sprintf("  ✗ Failed: %s\n", e$message))
+      mixed_results_short$calories <- NULL
+    })
+  } else {
+    cat("  ✗ Insufficient data\n")
+    mixed_results_short$calories <- NULL
+  }
+
+  cat("\n")
+
+  # Create summary table of mixed effects results
+  mixed_effects_table_short <- tibble()
+
+  for (outcome_name in names(mixed_results_short)) {
+    if (!is.null(mixed_results_short[[outcome_name]])) {
+      coef_table <- coef(summary(mixed_results_short[[outcome_name]]$model))
+
+      # Extract coefficients for each period (skip intercept)
+      for (i in 2:nrow(coef_table)) {
+        period_name <- rownames(coef_table)[i]
+        period_name <- gsub("period", "", period_name)
+
+        mixed_effects_table_short <- bind_rows(
+          mixed_effects_table_short,
+          tibble(
+            Outcome = outcome_name,
+            Period = period_name,
+            Estimate = coef_table[i, "Estimate"],
+            SE = coef_table[i, "Std. Error"],
+            t_value = coef_table[i, "t value"],
+            p_value = coef_table[i, "Pr(>|t|)"],
+            N_obs = mixed_results_short[[outcome_name]]$n_obs,
+            N_patients = mixed_results_short[[outcome_name]]$n_patients
+          )
+        )
+      }
+    }
+  }
+
+  # Save mixed effects results
+  write_csv(mixed_effects_table_short, "period_analysis_mixed_effects_short.csv")
+  cat("  ✓ period_analysis_mixed_effects_short.csv\n\n")
+
+  # Save all mixed effects objects
+  save(
+    mixed_results_main,
+    mixed_effects_table_main,
+    long_data_main,
+    mixed_results_short,
+    mixed_effects_table_short,
+    long_data_short,
+    file = "period_analysis_mixed_effects_results.RData"
+  )
+  cat("  ✓ period_analysis_mixed_effects_results.RData\n\n")
+
+  cat("=============================================================================\n")
+  cat("MIXED EFFECTS MODELS COMPLETE\n")
+  cat("=============================================================================\n\n")
+
+  cat("Interpretation:\n")
+  cat("- Estimates show change from baseline for each period\n")
+  cat("- Random intercepts account for correlation between repeated measures\n")
+  cat("- P-values from lmerTest using Satterthwaite approximation\n")
+  cat("- Compare to paired t-test results for consistency\n\n")
+
+} else {
+  cat("\n\n")
+  cat("=============================================================================\n")
+  cat("MIXED EFFECTS MODELS SKIPPED\n")
+  cat("=============================================================================\n\n")
+  cat("lme4/lmerTest packages not available. Install with:\n")
+  cat("  install.packages(c('lme4', 'lmerTest'))\n\n")
+}
 
 cat("\n\n")
 cat("=============================================================================\n")
