@@ -42,7 +42,9 @@ drug_sql <- paste("
         d_exposure.drug_concept_id,
         d_standard_concept.concept_name as standard_concept_name,
         d_exposure.drug_exposure_start_datetime,
-        d_exposure.drug_exposure_end_datetime
+        d_exposure.drug_exposure_end_datetime,
+        d_exposure.route_concept_id,
+        d_route.concept_name as route_concept_name
     FROM
         ( SELECT *
         FROM `drug_exposure` d_exposure
@@ -68,7 +70,9 @@ drug_sql <- paste("
                     WHERE has_fitbit = 1)))
             ) d_exposure
     LEFT JOIN `concept` d_standard_concept
-        ON d_exposure.drug_concept_id = d_standard_concept.concept_id", sep="")
+        ON d_exposure.drug_concept_id = d_standard_concept.concept_id
+    LEFT JOIN `concept` d_route
+        ON d_exposure.route_concept_id = d_route.concept_id", sep="")
 
 drug_path <- file.path(Sys.getenv("WORKSPACE_BUCKET"), "bq_exports", Sys.getenv("OWNER_EMAIL"),
                        strftime(lubridate::now(), "%Y%m%d"), "drug_comprehensive", "drug_comprehensive_*.csv")
@@ -78,18 +82,44 @@ bq_table_save(bq_dataset_query(Sys.getenv("WORKSPACE_CDR"), drug_sql, billing = 
 
 drug_df <- read_bq_export_from_workspace_bucket(drug_path)
 
+cat(sprintf("Raw GLP-1 exposures: %d\n", nrow(drug_df)))
+
+# Show route distribution before filtering
+route_counts <- drug_df %>%
+  mutate(route_clean = ifelse(is.na(route_concept_name), "Unknown", route_concept_name)) %>%
+  count(route_clean, sort = TRUE)
+cat("\nRoute distribution (top 10):\n")
+print(head(route_counts, 10))
+cat("\n")
+
 drug_glp1_clean <- drug_df %>%
+  # Filter out non-GLP-1 combos
   filter(!grepl("topical|recombinant|insulin|metformin|pioglitazone", standard_concept_name, ignore.case = TRUE)) %>%
+  # CRITICAL: Only injectable routes (exclude oral semaglutide)
+  filter(
+    is.na(route_concept_name) |  # Keep if route unknown (conservative)
+    grepl("subcutaneous|injection|injectable", route_concept_name, ignore.case = TRUE)
+  ) %>%
+  # Exclude oral routes explicitly
+  filter(
+    is.na(route_concept_name) |
+    !grepl("oral|sublingual|buccal|mouth", route_concept_name, ignore.case = TRUE)
+  ) %>%
   mutate(
     drug_start_date = as.Date(drug_exposure_start_datetime),
     drug_end_date = as.Date(drug_exposure_end_datetime)
   )
 
+cat(sprintf("After filtering to INJECTABLE routes only: %d exposures\n", nrow(drug_glp1_clean)))
+cat(sprintf("Removed: %d (%.1f%% - likely oral semaglutide)\n\n",
+            nrow(drug_df) - nrow(drug_glp1_clean),
+            100 * (nrow(drug_df) - nrow(drug_glp1_clean)) / nrow(drug_df)))
+
 glp1_initiation <- drug_glp1_clean %>%
   group_by(person_id) %>%
   summarize(glp1_initiation_date = min(drug_start_date, na.rm = TRUE), .groups = "drop")
 
-cat(sprintf("GLP-1 patients with Fitbit: %d\n\n", nrow(glp1_initiation)))
+cat(sprintf("Injectable GLP-1 patients with Fitbit: %d\n\n", nrow(glp1_initiation)))
 
 # =============================================================================
 # STEP 2: LOAD WEIGHT, HEIGHT, BMI DATA
@@ -339,20 +369,31 @@ cat("Inclusion criteria: BMI ≥ 30 OR obesity diagnosis\n\n")
 patients_bmi30 <- bmi_all %>%
   filter(days_from_initiation <= 0, bmi >= 30) %>%
   distinct(person_id) %>%
-  mutate(inclusion_reason = "BMI ≥ 30")
+  mutate(
+    person_id = as.numeric(person_id),  # Ensure numeric type
+    inclusion_reason = "BMI ≥ 30"
+  )
 
 cat(sprintf("Patients with baseline BMI ≥ 30: %d\n", nrow(patients_bmi30)))
 
 # Get patients with obesity diagnosis
 patients_obesity_dx <- obesity_patients %>%
   filter(person_id %in% glp1_initiation$person_id) %>%
-  mutate(inclusion_reason = "Obesity diagnosis")
+  mutate(
+    person_id = as.numeric(person_id),  # Ensure numeric type
+    inclusion_reason = "Obesity diagnosis"
+  )
 
 cat(sprintf("Patients with obesity diagnosis: %d\n", nrow(patients_obesity_dx)))
 
-# Combine (union)
-obesity_cohort <- bind_rows(patients_bmi30, patients_obesity_dx) %>%
-  distinct(person_id, .keep_all = TRUE)
+# Combine (union) - handle case where obesity_dx might be empty
+if (nrow(patients_obesity_dx) > 0) {
+  obesity_cohort <- bind_rows(patients_bmi30, patients_obesity_dx) %>%
+    distinct(person_id, .keep_all = TRUE)
+} else {
+  cat("  NOTE: No obesity diagnosis codes found, using BMI criterion only\n")
+  obesity_cohort <- patients_bmi30
+}
 
 cat(sprintf("\nTotal obesity cohort: %d patients\n\n", nrow(obesity_cohort)))
 
@@ -529,7 +570,8 @@ cat("  ✓ Total minutes: ≤1440 per day\n\n")
 
 cat("Cohort inclusion criteria:\n")
 cat("  ✓ BMI ≥ 30 OR obesity diagnosis\n")
-cat("  ✓ GLP-1 therapy (semaglutide/tirzepatide)\n")
+cat("  ✓ INJECTABLE GLP-1 therapy (semaglutide/tirzepatide)\n")
+cat("     - Subcutaneous route only (excludes oral semaglutide)\n")
 cat("  ✓ Fitbit activity data available\n\n")
 
 cat("Ready for analysis! Use: load('glp1_cleaned_data.RData')\n")
