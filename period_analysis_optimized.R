@@ -132,8 +132,7 @@ baseline_windows <- list(
 cat("Step 1: Identifying patients with 1-90d activity data + active treatment...\n")
 
 period_1_90d_activity <- activity_with_glp1 %>%
-  filter(person_id %in% eligible_person_ids,
-         days_from_initiation >= 1,
+  filter(days_from_initiation >= 1,
          days_from_initiation <= 90,
          is_valid_day == TRUE) %>%  # WEAR TIME: only valid days (≥10h)
   group_by(person_id) %>%
@@ -159,8 +158,7 @@ period_1_90d_activity <- activity_with_glp1 %>%
 
 # Get 1-90d weight separately (OPTIONAL - for those who have it)
 period_1_90d_weight <- weight_with_glp1 %>%
-  filter(person_id %in% eligible_person_ids,
-         days_from_initiation >= 1,
+  filter(days_from_initiation >= 1,
          days_from_initiation <= 90,
          !is.na(weight_kg)) %>%
   group_by(person_id) %>%
@@ -975,8 +973,7 @@ cat("Baseline reference: 1-30d period\n\n")
 
 # Get patients with 1-30d period data
 period_1_30d_activity <- activity_with_glp1 %>%
-  filter(person_id %in% eligible_person_ids,
-         days_from_initiation >= 1,
+  filter(days_from_initiation >= 1,
          days_from_initiation <= 30,
          is_valid_day == TRUE) %>%  # WEAR TIME: only valid days (≥10h)
   group_by(person_id) %>%
@@ -1001,8 +998,7 @@ period_1_30d_activity <- activity_with_glp1 %>%
   )
 
 period_1_30d_weight <- weight_with_glp1 %>%
-  filter(person_id %in% eligible_person_ids,
-         days_from_initiation >= 1,
+  filter(days_from_initiation >= 1,
          days_from_initiation <= 30,
          !is.na(weight_kg)) %>%
   group_by(person_id) %>%
