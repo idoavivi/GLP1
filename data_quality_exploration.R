@@ -2,88 +2,155 @@
 # Investigate anomalies in weight and activity data
 # Focus on identifying data quality issues requiring additional filters
 
+library(tidyverse)
 library(bigrquery)
-library(dplyr)
 library(lubridate)
-library(tidyr)
-library(ggplot2)
 
 cat("\n##################################################\n")
 cat("DATA QUALITY EXPLORATION\n")
 cat("Investigating weight gain anomaly in treatment data\n")
 cat("##################################################\n\n")
 
-# Connect to BigQuery
-project_id <- "all-of-us-data-tools"
-dataset_id <- "AoU_CDR_2024q2r2"
-billing_project <- "idoaviv-tauber-org"
+# Helper function to read BQ exports
+read_bq_export_from_workspace_bucket <- function(export_path, col_types = NULL) {
+  bind_rows(
+    map(system2('gsutil', args = c('ls', export_path), stdout = TRUE, stderr = TRUE),
+        function(csv) {
+          message(str_glue('Loading {csv}.'))
+          chunk <- read_csv(pipe(str_glue('gsutil cat {csv}')), col_types = col_types, show_col_types = FALSE)
+          if (is.null(col_types)) {
+            col_types <- spec(chunk)
+          }
+          chunk
+        }))
+}
 
 # ========================================
-# 1. QUERY ALL DATA
+# 1. LOAD GLP-1 DRUG DATA
 # ========================================
 
-cat("Step 1: Querying GLP-1 drug data...\n")
+message("Loading GLP-1 drug exposures...")
 
-drug_query <- sprintf("
-  SELECT
-    de.person_id,
-    de.drug_concept_id,
-    de.drug_exposure_start_date,
-    de.drug_exposure_end_date,
-    c.concept_name
-  FROM `%s.%s.drug_exposure` de
-  JOIN `%s.%s.concept` c ON de.drug_concept_id = c.concept_id
-  WHERE LOWER(c.concept_name) LIKE '%%semaglutide%%'
-     OR LOWER(c.concept_name) LIKE '%%tirzepatide%%'
-", project_id, dataset_id, project_id, dataset_id)
+drug_sql <- paste("
+    SELECT
+        d_exposure.person_id,
+        d_exposure.drug_concept_id,
+        d_standard_concept.concept_name as standard_concept_name,
+        d_exposure.drug_exposure_start_datetime,
+        d_exposure.drug_exposure_end_datetime
+    FROM
+        ( SELECT *
+        FROM `drug_exposure` d_exposure
+        WHERE
+            (drug_concept_id IN (SELECT DISTINCT ca.descendant_id
+                FROM `cb_criteria_ancestor` ca
+                JOIN (SELECT DISTINCT c.concept_id
+                    FROM `cb_criteria` c
+                    JOIN (SELECT CAST(cr.id as string) AS id
+                        FROM `cb_criteria` cr
+                        WHERE concept_id IN (779705, 793143)
+                            AND full_text LIKE '%_rank1]%') a
+                            ON (c.path LIKE CONCAT('%.', a.id, '.%')
+                            OR c.path LIKE CONCAT('%.', a.id)
+                            OR c.path LIKE CONCAT(a.id, '.%')
+                            OR c.path = a.id)
+                    WHERE is_standard = 1 AND is_selectable = 1) b
+                        ON (ca.ancestor_id = b.concept_id)))
+                    AND (d_exposure.PERSON_ID IN (SELECT distinct person_id
+                FROM `cb_search_person` cb_search_person
+                WHERE cb_search_person.person_id IN (SELECT person_id
+                    FROM `cb_search_person` p
+                    WHERE has_fitbit = 1)))
+            ) d_exposure
+    LEFT JOIN `concept` d_standard_concept
+        ON d_exposure.drug_concept_id = d_standard_concept.concept_id", sep="")
 
-drug_glp1_raw <- bq_project_query(billing_project, drug_query) %>%
-  bq_table_download()
+drug_path <- file.path(
+  Sys.getenv("WORKSPACE_BUCKET"),
+  "bq_exports",
+  Sys.getenv("OWNER_EMAIL"),
+  strftime(lubridate::now(), "%Y%m%d"),
+  "drug_dq",
+  "drug_dq_*.csv")
 
-drug_glp1_clean <- drug_glp1_raw %>%
-  filter(!grepl("topical|recombinant|insulin|metformin|pioglitazone", concept_name, ignore.case = TRUE)) %>%
+bq_table_save(
+  bq_dataset_query(Sys.getenv("WORKSPACE_CDR"), drug_sql, billing = Sys.getenv("GOOGLE_PROJECT")),
+  drug_path,
+  destination_format = "CSV")
+
+drug_df <- read_bq_export_from_workspace_bucket(drug_path)
+
+message(str_glue("Loaded {nrow(drug_df)} drug exposures"))
+
+# Clean drug data
+drug_glp1_clean <- drug_df %>%
+  filter(!grepl("topical|recombinant|insulin|metformin|pioglitazone",
+                standard_concept_name, ignore.case = TRUE)) %>%
   mutate(
-    drug_start_date = as.Date(drug_exposure_start_date),
-    drug_end_date = as.Date(drug_exposure_end_date)
+    drug_start_date = as.Date(drug_exposure_start_datetime),
+    drug_end_date = as.Date(drug_exposure_end_datetime)
   )
 
+# Define initiation
 glp1_initiation <- drug_glp1_clean %>%
   group_by(person_id) %>%
   summarize(glp1_initiation_date = min(drug_start_date, na.rm = TRUE), .groups = "drop")
 
-cat("Step 2: Querying ALL weight measurements...\n")
-
-# Query ALL weight data (no filters initially)
-weight_query <- sprintf("
-  SELECT
-    person_id,
-    measurement_date,
-    measurement_datetime,
-    value_as_number AS weight_pounds,
-    value_as_number * 0.453592 AS weight_kg,
-    measurement_source_value,
-    measurement_source_concept_id
-  FROM `%s.%s.measurement`
-  WHERE measurement_concept_id = 3025315
-", project_id, dataset_id)
-
-weight_raw <- bq_project_query(billing_project, weight_query) %>%
-  bq_table_download()
-
-cat(sprintf("  Total weight measurements: %s\n", format(nrow(weight_raw), big.mark = ",")))
-
-# Add GLP-1 context
-weight_with_glp1 <- weight_raw %>%
-  inner_join(glp1_initiation, by = "person_id") %>%
-  mutate(
-    measurement_date = as.Date(measurement_date),
-    days_from_initiation = as.numeric(difftime(measurement_date, glp1_initiation_date, units = "days"))
-  )
-
-cat(sprintf("  Weight measurements in GLP-1 cohort: %s\n", format(nrow(weight_with_glp1), big.mark = ",")))
+message(str_glue("Identified {nrow(glp1_initiation)} patients with GLP-1 therapy"))
 
 # ========================================
-# 2. WEIGHT DATA QUALITY CHECKS
+# 2. LOAD WEIGHT DATA
+# ========================================
+
+message("Loading ALL weight measurements...")
+
+weight_sql <- paste("
+    SELECT
+        measurement.person_id,
+        measurement.measurement_datetime,
+        measurement.value_as_number,
+        measurement.unit_concept_id,
+        m_unit.concept_name as unit_concept_name
+    FROM `measurement` measurement
+    LEFT JOIN `concept` m_unit
+        ON measurement.unit_concept_id = m_unit.concept_id
+    WHERE measurement.measurement_concept_id = 3025315
+        AND measurement.PERSON_ID IN (SELECT distinct person_id
+            FROM `cb_search_person` cb_search_person
+            WHERE cb_search_person.person_id IN (SELECT person_id
+                FROM `cb_search_person` p
+                WHERE has_fitbit = 1))", sep="")
+
+weight_path <- file.path(
+  Sys.getenv("WORKSPACE_BUCKET"),
+  "bq_exports",
+  Sys.getenv("OWNER_EMAIL"),
+  strftime(lubridate::now(), "%Y%m%d"),
+  "weight_dq",
+  "weight_dq_*.csv")
+
+bq_table_save(
+  bq_dataset_query(Sys.getenv("WORKSPACE_CDR"), weight_sql, billing = Sys.getenv("GOOGLE_PROJECT")),
+  weight_path,
+  destination_format = "CSV")
+
+weight_raw <- read_bq_export_from_workspace_bucket(weight_path)
+
+message(str_glue("Loaded {nrow(weight_raw)} weight measurements"))
+
+# Process weight data
+weight_with_glp1 <- weight_raw %>%
+  mutate(
+    measurement_date = as.Date(measurement_datetime),
+    weight_kg = value_as_number * 0.453592  # Convert pounds to kg
+  ) %>%
+  inner_join(glp1_initiation, by = "person_id") %>%
+  mutate(days_from_initiation = as.numeric(difftime(measurement_date, glp1_initiation_date, units = "days")))
+
+message(str_glue("Weight measurements in GLP-1 cohort: {nrow(weight_with_glp1)}"))
+
+# ========================================
+# 3. WEIGHT DATA QUALITY CHECKS
 # ========================================
 
 cat("\n========================================\n")
@@ -120,7 +187,7 @@ extreme_weights <- weight_with_glp1 %>%
     weight_kg < 30 |  # < 66 lbs - likely infants or errors
     weight_kg > 300   # > 660 lbs - likely errors
   ) %>%
-  select(person_id, measurement_date, weight_pounds, weight_kg, days_from_initiation) %>%
+  select(person_id, measurement_date, value_as_number, weight_kg, days_from_initiation) %>%
   arrange(weight_kg)
 
 cat(sprintf("  Found %d extreme/invalid weights (%.2f%%)\n",
@@ -135,7 +202,6 @@ if (nrow(extreme_weights) > 0) {
 # Check 3: Within-person weight changes
 cat("\n\nCheck 3: Analyzing within-person weight changes over time\n")
 
-# Calculate consecutive weight changes
 weight_changes <- weight_with_glp1 %>%
   filter(!is.na(weight_kg), weight_kg > 0) %>%
   arrange(person_id, measurement_date) %>%
@@ -150,10 +216,9 @@ weight_changes <- weight_with_glp1 %>%
   ) %>%
   filter(!is.na(prev_weight))
 
-# Extreme changes
 extreme_changes <- weight_changes %>%
   filter(
-    abs(weight_change_kg) > 20 |  # >20kg change between consecutive measurements
+    abs(weight_change_kg) > 20 |  # >20kg change
     abs(daily_change_rate) > 1    # >1kg/day sustained change
   ) %>%
   arrange(desc(abs(weight_change_kg)))
@@ -195,174 +260,26 @@ if (nrow(same_day_dups) > 0) {
 }
 
 # ========================================
-# 3. TEMPORAL PATTERN ANALYSIS
+# 4. SAVE FLAGGED CASES
 # ========================================
 
-cat("\n\n========================================\n")
-cat("TEMPORAL PATTERN ANALYSIS\n")
-cat("========================================\n\n")
+cat("\n\nSaving flagged data for review...\n")
 
-# Focus on the problematic period: 91-180 days
-cat("Analyzing weight at 91-180d period (where gain was observed)...\n\n")
-
-# Clean weight data first
-weight_clean <- weight_with_glp1 %>%
-  filter(
-    !is.na(weight_kg),
-    weight_kg > 30,      # Min reasonable adult weight
-    weight_kg < 300      # Max reasonable weight
-  )
-
-# Get baseline weights (using -90 to -31 as in analysis)
-baseline_weights <- weight_clean %>%
-  filter(days_from_initiation >= -90, days_from_initiation <= -31) %>%
-  group_by(person_id) %>%
-  summarize(
-    baseline_weight = max(weight_kg, na.rm = TRUE),  # Using MAX as in analysis
-    baseline_date = measurement_date[which.max(weight_kg)],
-    n_baseline_measurements = n(),
-    .groups = "drop"
-  )
-
-# Get weights in each follow-up period
-period_weights <- list()
-
-periods <- list(
-  "1-30d" = c(1, 30),
-  "31-90d" = c(31, 90),
-  "91-180d" = c(91, 180),
-  "181-365d" = c(181, 365)
-)
-
-for (period_name in names(periods)) {
-  period <- periods[[period_name]]
-
-  period_data <- weight_clean %>%
-    filter(days_from_initiation >= period[1], days_from_initiation <= period[2]) %>%
-    group_by(person_id) %>%
-    summarize(
-      !!paste0(period_name, "_weight_min") := min(weight_kg, na.rm = TRUE),
-      !!paste0(period_name, "_weight_mean") := mean(weight_kg, na.rm = TRUE),
-      !!paste0(period_name, "_weight_median") := median(weight_kg, na.rm = TRUE),
-      !!paste0(period_name, "_weight_max") := max(weight_kg, na.rm = TRUE),
-      !!paste0(period_name, "_n_measurements") := n(),
-      .groups = "drop"
-    )
-
-  period_weights[[period_name]] <- period_data
+if (nrow(extreme_weights) > 0) {
+  write.csv(extreme_weights, "flagged_extreme_weights.csv", row.names = FALSE)
+  cat("  - flagged_extreme_weights.csv\n")
 }
 
-# Merge all periods
-all_periods_weight <- baseline_weights
-for (period_name in names(periods)) {
-  all_periods_weight <- all_periods_weight %>%
-    left_join(period_weights[[period_name]], by = "person_id")
-}
-
-# Calculate nadir
-nadir_weights <- weight_clean %>%
-  filter(days_from_initiation > 0) %>%
-  group_by(person_id) %>%
-  summarize(
-    nadir_weight = min(weight_kg, na.rm = TRUE),
-    nadir_date = measurement_date[which.min(weight_kg)],
-    nadir_days = days_from_initiation[which.min(weight_kg)],
-    .groups = "drop"
-  )
-
-all_periods_weight <- all_periods_weight %>%
-  left_join(nadir_weights, by = "person_id") %>%
-  mutate(
-    weight_loss_pct = 100 * (nadir_weight - baseline_weight) / baseline_weight
-  )
-
-# Identify patients showing weight GAIN during treatment
-cat("Identifying patients with weight GAIN in 91-180d period:\n")
-
-weight_gainers <- all_periods_weight %>%
-  filter(!is.na(`91-180d_weight_mean`)) %>%
-  mutate(
-    gain_91_180 = `91-180d_weight_mean` - baseline_weight,
-    gain_91_180_pct = 100 * gain_91_180 / baseline_weight
-  ) %>%
-  filter(gain_91_180 > 5) %>%  # Gained >5kg
-  arrange(desc(gain_91_180))
-
-cat(sprintf("\n  Found %d patients with >5kg weight gain in 91-180d period\n", nrow(weight_gainers)))
-
-if (nrow(weight_gainers) > 0) {
-  cat("\nTop 10 weight gainers:\n")
-  print(head(weight_gainers %>%
-               select(person_id, baseline_weight, `91-180d_weight_mean`,
-                      gain_91_180, nadir_weight, weight_loss_pct), 10))
-
-  # Look at individual trajectories for these patients
-  cat("\n\nDetailed trajectory for top gainer:\n")
-  top_gainer_id <- weight_gainers$person_id[1]
-
-  top_gainer_trajectory <- weight_clean %>%
-    filter(person_id == top_gainer_id) %>%
-    arrange(measurement_date) %>%
-    select(person_id, measurement_date, days_from_initiation, weight_kg)
-
-  print(top_gainer_trajectory)
+if (nrow(extreme_changes) > 0) {
+  write.csv(extreme_changes %>%
+              select(person_id, prev_date, measurement_date, days_between,
+                     prev_weight, weight_kg, weight_change_kg, weight_change_pct),
+            "flagged_extreme_changes.csv", row.names = FALSE)
+  cat("  - flagged_extreme_changes.csv\n")
 }
 
 # ========================================
-# 4. VISUALIZE PROBLEMATIC CASES
-# ========================================
-
-cat("\n\n========================================\n")
-cat("CREATING DIAGNOSTIC VISUALIZATIONS\n")
-cat("========================================\n\n")
-
-# Plot 1: Distribution of weight changes 91-180d vs baseline
-if (nrow(weight_gainers) > 0) {
-
-  p1 <- ggplot(all_periods_weight %>% filter(!is.na(`91-180d_weight_mean`)) %>%
-                 mutate(gain_91_180 = `91-180d_weight_mean` - baseline_weight),
-               aes(x = gain_91_180)) +
-    geom_histogram(bins = 50, fill = "steelblue", alpha = 0.7) +
-    geom_vline(xintercept = 0, linetype = "dashed", color = "red", size = 1) +
-    geom_vline(xintercept = 5, linetype = "dashed", color = "orange", size = 1) +
-    labs(title = "Weight Change Distribution: 91-180d vs Baseline",
-         subtitle = sprintf("%d patients gained >5kg (orange line)", nrow(weight_gainers)),
-         x = "Weight Change (kg)",
-         y = "Count") +
-    theme_minimal()
-
-  ggsave("diagnostic_weight_change_distribution.png", p1, width = 10, height = 6, dpi = 300)
-  cat("Saved: diagnostic_weight_change_distribution.png\n")
-}
-
-# Plot 2: Individual trajectories for weight gainers
-if (nrow(weight_gainers) > 0) {
-
-  sample_gainers <- head(weight_gainers$person_id, 20)
-
-  gainer_trajectories <- weight_clean %>%
-    filter(person_id %in% sample_gainers) %>%
-    arrange(person_id, measurement_date)
-
-  p2 <- ggplot(gainer_trajectories, aes(x = days_from_initiation, y = weight_kg,
-                                         group = person_id, color = factor(person_id))) +
-    geom_line(alpha = 0.6, size = 0.8) +
-    geom_point(alpha = 0.4, size = 1) +
-    geom_vline(xintercept = 0, linetype = "dashed", color = "red", size = 1) +
-    geom_vline(xintercept = c(91, 180), linetype = "dotted", color = "orange") +
-    labs(title = "Individual Weight Trajectories: Top 20 Weight Gainers",
-         subtitle = "Red line = initiation, Orange lines = 91-180d period",
-         x = "Days from GLP-1 Initiation",
-         y = "Weight (kg)") +
-    theme_minimal() +
-    theme(legend.position = "none")
-
-  ggsave("diagnostic_weight_gainer_trajectories.png", p2, width = 12, height = 8, dpi = 300)
-  cat("Saved: diagnostic_weight_gainer_trajectories.png\n")
-}
-
-# ========================================
-# 5. PROPOSED FILTERS
+# 5. RECOMMENDED FILTERS
 # ========================================
 
 cat("\n\n========================================\n")
@@ -396,30 +313,39 @@ filters_summary <- tibble(
 print(filters_summary)
 
 # ========================================
-# 6. SAVE FLAGGED CASES
+# 6. CREATE VISUALIZATIONS
 # ========================================
 
-cat("\n\nSaving flagged data for review...\n")
+cat("\n\nCreating diagnostic visualizations...\n")
 
-# Save extreme weights
-if (nrow(extreme_weights) > 0) {
-  write.csv(extreme_weights, "flagged_extreme_weights.csv", row.names = FALSE)
-  cat("  - flagged_extreme_weights.csv\n")
-}
+# Plot 1: Weight distribution
+p1 <- ggplot(weight_with_glp1 %>% filter(weight_kg > 0, weight_kg < 500),
+             aes(x = weight_kg)) +
+  geom_histogram(bins = 100, fill = "steelblue", alpha = 0.7) +
+  geom_vline(xintercept = c(30, 300), linetype = "dashed", color = "red", size = 1) +
+  labs(title = "Weight Distribution (All Measurements)",
+       subtitle = "Red lines show suggested min/max cutoffs",
+       x = "Weight (kg)",
+       y = "Count") +
+  theme_minimal()
 
-# Save extreme changes
-if (nrow(extreme_changes) > 0) {
-  write.csv(extreme_changes %>%
-              select(person_id, prev_date, measurement_date, days_between,
-                     prev_weight, weight_kg, weight_change_kg, weight_change_pct),
-            "flagged_extreme_changes.csv", row.names = FALSE)
-  cat("  - flagged_extreme_changes.csv\n")
-}
+ggsave("diagnostic_weight_distribution.png", p1, width = 10, height = 6, dpi = 300)
+cat("Saved: diagnostic_weight_distribution.png\n")
 
-# Save weight gainers
-if (nrow(weight_gainers) > 0) {
-  write.csv(weight_gainers, "flagged_weight_gainers_91_180d.csv", row.names = FALSE)
-  cat("  - flagged_weight_gainers_91_180d.csv\n")
+# Plot 2: Weight changes distribution
+if (nrow(weight_changes) > 0) {
+  p2 <- ggplot(weight_changes %>% filter(abs(weight_change_kg) < 50),
+               aes(x = weight_change_kg)) +
+    geom_histogram(bins = 100, fill = "coral", alpha = 0.7) +
+    geom_vline(xintercept = c(-20, 20), linetype = "dashed", color = "red", size = 1) +
+    labs(title = "Distribution of Consecutive Weight Changes",
+         subtitle = "Red lines show ±20kg cutoff for extreme changes",
+         x = "Weight Change (kg)",
+         y = "Count") +
+    theme_minimal()
+
+  ggsave("diagnostic_weight_changes.png", p2, width = 10, height = 6, dpi = 300)
+  cat("Saved: diagnostic_weight_changes.png\n")
 }
 
 cat("\n##################################################\n")
@@ -430,5 +356,4 @@ cat("SUMMARY:\n")
 cat(sprintf("- Total weight measurements: %s\n", format(nrow(weight_with_glp1), big.mark = ",")))
 cat(sprintf("- Patients with extreme values: %d\n", nrow(extreme_weights)))
 cat(sprintf("- Extreme weight changes: %d\n", nrow(extreme_changes)))
-cat(sprintf("- Patients gaining >5kg in 91-180d: %d\n", nrow(weight_gainers)))
 cat("\nReview the CSV files and plots to determine appropriate filters.\n")
