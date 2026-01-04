@@ -3,13 +3,28 @@
 # =============================================================================
 # Uses optimized baseline selection and focuses on key aggregated periods
 # Plus nadir weight with surrounding activity data
+# NOW USES CLEANED DATA (quality-filtered weights and activity)
 # =============================================================================
 
 library(tidyverse)
 
-# Load data
-load("glp1_processed_data.RData")
-load("windowed_analysis_results.RData")
+# Load CLEANED data (must run clean_data.R first!)
+cat("Loading cleaned data...\n")
+if (!file.exists("glp1_cleaned_data.RData")) {
+  stop("ERROR: glp1_cleaned_data.RData not found!\n",
+       "Please run clean_data.R first to create cleaned datasets.")
+}
+
+load("glp1_cleaned_data.RData")
+
+# Rename for compatibility with rest of script
+activity_with_glp1 <- activity_cleaned
+weight_with_glp1 <- weight_cleaned
+
+cat(sprintf("Loaded cleaned data:\n"))
+cat(sprintf("  - %s patients with GLP-1 therapy\n", nrow(glp1_initiation)))
+cat(sprintf("  - %s weight measurements (quality-filtered)\n", nrow(weight_with_glp1)))
+cat(sprintf("  - %s activity records (quality-filtered)\n\n", nrow(activity_with_glp1)))
 
 cat("=============================================================================\n")
 cat("PERIOD-BASED ANALYSIS WITH OPTIMIZED BASELINE AND NADIR\n")
@@ -24,9 +39,6 @@ if (require(lme4, quietly = TRUE) && require(lmerTest, quietly = TRUE)) {
   cat("WARNING: lme4 and/or lmerTest not available.\n")
   cat("Proceeding with paired t-tests only.\n\n")
 }
-
-# Get eligible patients
-eligible_person_ids <- windowed_analysis_results$eligible_patients$person_id
 
 # =============================================================================
 # WEAR TIME PROCESSING (CRITICAL FOR DATA QUALITY)
@@ -103,13 +115,7 @@ cat("===========================================================================
 
 cat("Strategy: Find patients with BOTH baseline AND 1-90d data, then select best baseline\n\n")
 
-# Prepare drug data for active treatment check
-drug_glp1_clean <- drug_glp1 %>%
-  filter(!is.na(drug_start_date)) %>%
-  mutate(
-    drug_start_date = as.Date(drug_start_date),
-    drug_end_date = if_else(!is.na(drug_end_date), as.Date(drug_end_date), as.Date(NA))
-  )
+# Note: drug_glp1_clean already loaded from cleaned data with proper date formatting
 
 # Define candidate baseline windows
 baseline_windows <- list(
