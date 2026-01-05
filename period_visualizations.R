@@ -13,8 +13,11 @@ if (!require(patchwork, quietly = TRUE)) {
   library(patchwork)
 }
 
-# Load results
-load("period_analysis_results.RData")
+# Load results from OPTIMIZED analysis
+load("period_analysis_optimized_results.RData")
+
+# Create alias for compatibility
+period_summary_table <- comprehensive_table
 
 cat("=============================================================================\n")
 cat("PERIOD ANALYSIS VISUALIZATIONS\n")
