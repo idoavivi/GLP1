@@ -432,14 +432,14 @@ cat("STEP 2: CALCULATING NADIR WEIGHT AND ACTIVITY\n")
 cat("=============================================================================\n\n")
 
 # Find nadir (lowest on-treatment weight) for each patient in matched cohort
-# Exclude first 30 days (too early for GLP-1 weight loss effect)
+# Start at 12 weeks (84 days) post-initiation for biologically meaningful GLP-1 effect
 # Require at least 2% weight loss from baseline
 baseline_weights_for_nadir <- baseline_data %>%
   select(person_id, baseline_weight)
 
 nadir_weights <- weight_with_glp1 %>%
   filter(person_id %in% final_cohort_ids,
-         days_from_initiation >= 30,  # Exclude first 30 days (biologically implausible)
+         days_from_initiation >= 84,  # Start at 12 weeks post-initiation
          !is.na(weight_kg)) %>%
   inner_join(baseline_weights_for_nadir, by = "person_id") %>%
   # Require at least 2% weight loss from baseline
@@ -1220,13 +1220,13 @@ for (period_name in names(time_periods_short)) {
 }
 
 # Calculate nadir for short analysis
-# Exclude first 30 days and require at least 2% weight loss
+# Start at 12 weeks (84 days) and require at least 2% weight loss
 baseline_weights_for_nadir_short <- baseline_data_short %>%
   select(person_id, baseline_weight)
 
 nadir_weights_short <- weight_with_glp1 %>%
   filter(person_id %in% final_cohort_ids_short,
-         days_from_initiation >= 30,  # Exclude first 30 days
+         days_from_initiation >= 84,  # Start at 12 weeks post-initiation
          !is.na(weight_kg)) %>%
   inner_join(baseline_weights_for_nadir_short, by = "person_id") %>%
   filter(weight_kg < baseline_weight * 0.98) %>%  # Require 2% weight loss
