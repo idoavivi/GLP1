@@ -136,7 +136,7 @@ period_1_90d_activity <- activity_with_glp1 %>%
          days_from_initiation <= 90,
          is_valid_day == TRUE) %>%  # WEAR TIME: only valid days (≥10h)
   group_by(person_id) %>%
-  filter(n() >= 7) %>%  # NOISE REDUCTION: require ≥7 valid days
+  filter(n() >= 3) %>%  # Require at least 3 valid days
   summarize(
     period_steps = mean(steps, na.rm = TRUE),
     period_sedentary = mean(sedentary_minutes, na.rm = TRUE),
@@ -218,7 +218,7 @@ for (window_name in names(baseline_windows)) {
            days_from_initiation <= window[2],
            is_valid_day == TRUE) %>%  # WEAR TIME: only valid days (≥10h)
     group_by(person_id) %>%
-    filter(n() >= 7) %>%  # NOISE REDUCTION: require ≥7 valid days
+    filter(n() >= 3) %>%  # Require at least 3 valid days
     summarize(
       baseline_steps = mean(steps, na.rm = TRUE),
       baseline_sedentary = mean(sedentary_minutes, na.rm = TRUE),
@@ -357,7 +357,7 @@ for (period_name in names(time_periods)) {
            days_from_initiation <= end_day,
            is_valid_day == TRUE) %>%  # WEAR TIME: only valid days (≥10h)
     group_by(person_id) %>%
-    filter(n() >= 7) %>%  # NOISE REDUCTION: require ≥7 valid days
+    filter(n() >= 3) %>%  # Require at least 3 valid days
     summarize(
       period_steps = mean(steps, na.rm = TRUE),
       period_sedentary = mean(sedentary_minutes, na.rm = TRUE),
@@ -481,7 +481,7 @@ nadir_activity <- nadir_with_active_check %>%
   filter(abs(days_from_nadir) <= 30,  # ±30 days from nadir
          is_valid_day == TRUE) %>%  # WEAR TIME: only valid days (≥10h)
   group_by(person_id) %>%
-  filter(n() >= 7) %>%  # NOISE REDUCTION: require ≥7 valid days
+  filter(n() >= 3) %>%  # Require at least 3 valid days
   summarize(
     nadir_steps = mean(steps, na.rm = TRUE),
     nadir_sedentary = mean(sedentary_minutes, na.rm = TRUE),
@@ -991,7 +991,7 @@ period_1_30d_activity <- activity_with_glp1 %>%
          days_from_initiation <= 30,
          is_valid_day == TRUE) %>%  # WEAR TIME: only valid days (≥10h)
   group_by(person_id) %>%
-  filter(n() >= 7) %>%  # NOISE REDUCTION: require ≥7 valid days
+  filter(n() >= 3) %>%  # Require at least 3 valid days
   summarize(
     period_steps = mean(steps, na.rm = TRUE),
     period_sedentary = mean(sedentary_minutes, na.rm = TRUE),
@@ -1066,7 +1066,7 @@ for (window_name in names(baseline_windows)) {
            days_from_initiation <= window[2],
            is_valid_day == TRUE) %>%  # WEAR TIME: only valid days (≥10h)
     group_by(person_id) %>%
-    filter(n() >= 7) %>%  # NOISE REDUCTION: require ≥7 valid days
+    filter(n() >= 3) %>%  # Require at least 3 valid days
     summarize(
       baseline_steps = mean(steps, na.rm = TRUE),
       baseline_sedentary = mean(sedentary_minutes, na.rm = TRUE),
@@ -1165,7 +1165,7 @@ for (period_name in names(time_periods_short)) {
            days_from_initiation <= end_day,
            is_valid_day == TRUE) %>%  # WEAR TIME: only valid days (≥10h)
     group_by(person_id) %>%
-    filter(n() >= 7) %>%  # NOISE REDUCTION: require ≥7 valid days
+    filter(n() >= 3) %>%  # Require at least 3 valid days
     summarize(
       period_steps = mean(steps, na.rm = TRUE),
       period_sedentary = mean(sedentary_minutes, na.rm = TRUE),
@@ -1264,7 +1264,7 @@ nadir_activity_short <- nadir_with_active_short %>%
   filter(abs(days_from_nadir) <= 30,
          is_valid_day == TRUE) %>%  # WEAR TIME: only valid days (≥10h)
   group_by(person_id) %>%
-  filter(n() >= 7) %>%  # NOISE REDUCTION: require ≥7 valid days
+  filter(n() >= 3) %>%  # Require at least 3 valid days
   summarize(
     nadir_steps = mean(steps, na.rm = TRUE),
     nadir_sedentary = mean(sedentary_minutes, na.rm = TRUE),
