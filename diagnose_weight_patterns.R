@@ -21,11 +21,29 @@ if (!file.exists("glp1_cleaned_data.RData")) {
 
 load("glp1_cleaned_data.RData")
 
-# Rename for compatibility
-activity_with_glp1 <- activity_cleaned
-weight_with_glp1 <- weight_cleaned
+# Check what's in the RData file
+cat("Objects in glp1_cleaned_data.RData:\n")
+print(ls())
 
-cat("Data loaded successfully.\n\n")
+# Use the FINAL obesity cohort data, not the intermediate cleaned data
+if (!exists("obesity_cohort")) {
+  stop("ERROR: obesity_cohort not found in RData file!")
+}
+
+# Filter to obesity cohort ONLY
+final_person_ids <- obesity_cohort$person_id
+
+# CRITICAL: Use only obesity cohort patients
+activity_with_glp1 <- activity_cleaned %>%
+  filter(person_id %in% final_person_ids)
+
+weight_with_glp1 <- weight_cleaned %>%
+  filter(person_id %in% final_person_ids)
+
+cat(sprintf("\nData loaded successfully.\n"))
+cat(sprintf("Obesity cohort: %d patients\n", length(final_person_ids)))
+cat(sprintf("Weight data: %d measurements\n", nrow(weight_with_glp1)))
+cat(sprintf("Activity data: %d records\n\n", nrow(activity_with_glp1)))
 
 # =============================================================================
 # ANALYSIS 1: WEIGHT CHANGE DISTRIBUTION BY PERIOD
@@ -49,7 +67,30 @@ baseline_weights <- weight_with_glp1 %>%
   filter(n() >= 2) %>%
   summarize(baseline_weight = max(weight_kg), .groups = "drop")
 
-cat(sprintf("Patients with valid baseline weight: %d\n\n", nrow(baseline_weights)))
+cat(sprintf("Patients with valid baseline weight: %d\n", nrow(baseline_weights)))
+
+# SANITY CHECK: Verify baseline weights make sense for obesity cohort
+cat("\nBaseline weight distribution (should be ≥80-90 kg for BMI ≥30):\n")
+cat(sprintf("  Mean: %.1f kg\n", mean(baseline_weights$baseline_weight)))
+cat(sprintf("  Median: %.1f kg\n", median(baseline_weights$baseline_weight)))
+cat(sprintf("  Min: %.1f kg\n", min(baseline_weights$baseline_weight)))
+cat(sprintf("  Max: %.1f kg\n", max(baseline_weights$baseline_weight)))
+
+weight_sanity <- baseline_weights %>%
+  mutate(
+    weight_category = case_when(
+      baseline_weight < 70 ~ "<70 kg (IMPOSSIBLE for BMI≥30)",
+      baseline_weight < 80 ~ "70-80 kg (Very short only)",
+      baseline_weight < 100 ~ "80-100 kg",
+      baseline_weight < 120 ~ "100-120 kg",
+      TRUE ~ "≥120 kg"
+    )
+  ) %>%
+  count(weight_category) %>%
+  mutate(percent = 100 * n / sum(n))
+
+print(weight_sanity)
+cat("\n")
 
 # Analyze each period
 for (period_name in names(periods)) {
