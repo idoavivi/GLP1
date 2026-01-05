@@ -90,6 +90,8 @@ if (exists("bmi_data")) {
   }
 } else {
   cat("WARNING: bmi_data not found in RData file\n")
+  # Create empty bmi_baseline to prevent errors downstream
+  bmi_baseline <- tibble(person_id = integer(), bmi = numeric(), measurement_date = as.Date(character()))
 }
 
 # =============================================================================
