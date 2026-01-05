@@ -378,16 +378,21 @@ cat("========================================\n\n")
 
 cat("Inclusion criteria: BMI ≥ 30 OR obesity diagnosis\n\n")
 
-# Get patients with BMI ≥ 30 at baseline (before or at GLP-1 initiation)
+# Get patients with BMI ≥ 30 at baseline (within 180 days before initiation)
+# Use MOST RECENT BMI in baseline window to ensure current obesity status
 patients_bmi30 <- bmi_all %>%
-  filter(days_from_initiation <= 0, bmi >= 30) %>%
+  filter(days_from_initiation >= -180, days_from_initiation <= 0, bmi >= 30) %>%
+  group_by(person_id) %>%
+  # Take most recent BMI before initiation
+  filter(days_from_initiation == max(days_from_initiation)) %>%
+  ungroup() %>%
   distinct(person_id) %>%
   mutate(
     person_id = as.numeric(person_id),  # Ensure numeric type
     inclusion_reason = "BMI ≥ 30"
   )
 
-cat(sprintf("Patients with baseline BMI ≥ 30: %d\n", nrow(patients_bmi30)))
+cat(sprintf("Patients with baseline BMI ≥ 30 (within 180d): %d\n", nrow(patients_bmi30)))
 
 # Get patients with obesity diagnosis
 patients_obesity_dx <- obesity_patients %>%
