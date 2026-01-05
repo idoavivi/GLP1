@@ -42,6 +42,9 @@ cat("========================================\n")
 cat("ANALYSIS 1: BMI at Baseline\n")
 cat("========================================\n\n")
 
+# Initialize bmi_baseline as empty to ensure it exists
+bmi_baseline <- tibble(person_id = integer(), bmi = numeric(), measurement_date = as.Date(character()))
+
 # Get BMI data for these patients
 if (exists("bmi_data")) {
   bmi_baseline <- bmi_data %>%
@@ -53,45 +56,48 @@ if (exists("bmi_data")) {
     ungroup() %>%
     select(person_id, bmi, measurement_date)
 
-  cat("Most recent baseline BMI for low-weight patients:\n")
-  cat(sprintf("  N with BMI data: %d / %d\n", nrow(bmi_baseline), length(low_weight_patients)))
-  cat(sprintf("  Mean BMI: %.1f\n", mean(bmi_baseline$bmi)))
-  cat(sprintf("  Median BMI: %.1f\n", median(bmi_baseline$bmi)))
-  cat(sprintf("  Min BMI: %.1f\n", min(bmi_baseline$bmi)))
-  cat(sprintf("  Max BMI: %.1f\n", max(bmi_baseline$bmi)))
+  if (nrow(bmi_baseline) > 0) {
+    cat("Most recent baseline BMI for low-weight patients:\n")
+    cat(sprintf("  N with BMI data: %d / %d\n", nrow(bmi_baseline), length(low_weight_patients)))
+    cat(sprintf("  Mean BMI: %.1f\n", mean(bmi_baseline$bmi)))
+    cat(sprintf("  Median BMI: %.1f\n", median(bmi_baseline$bmi)))
+    cat(sprintf("  Min BMI: %.1f\n", min(bmi_baseline$bmi)))
+    cat(sprintf("  Max BMI: %.1f\n", max(bmi_baseline$bmi)))
 
-  # BMI distribution
-  bmi_categories <- bmi_baseline %>%
-    mutate(
-      bmi_category = case_when(
-        bmi < 25 ~ "<25 (Normal - SHOULD NOT BE HERE!)",
-        bmi < 27 ~ "25-27 (Overweight - borderline)",
-        bmi < 30 ~ "27-30 (Overweight - close)",
-        bmi < 35 ~ "30-35 (Class I obesity)",
-        bmi < 40 ~ "35-40 (Class II obesity)",
-        TRUE ~ "≥40 (Class III obesity)"
-      )
-    ) %>%
-    count(bmi_category) %>%
-    mutate(percent = 100 * n / sum(n)) %>%
-    arrange(desc(percent))
+    # BMI distribution
+    bmi_categories <- bmi_baseline %>%
+      mutate(
+        bmi_category = case_when(
+          bmi < 25 ~ "<25 (Normal - SHOULD NOT BE HERE!)",
+          bmi < 27 ~ "25-27 (Overweight - borderline)",
+          bmi < 30 ~ "27-30 (Overweight - close)",
+          bmi < 35 ~ "30-35 (Class I obesity)",
+          bmi < 40 ~ "35-40 (Class II obesity)",
+          TRUE ~ "≥40 (Class III obesity)"
+        )
+      ) %>%
+      count(bmi_category) %>%
+      mutate(percent = 100 * n / sum(n)) %>%
+      arrange(desc(percent))
 
-  cat("\nBMI distribution for <100 kg patients:\n")
-  print(bmi_categories)
+    cat("\nBMI distribution for <100 kg patients:\n")
+    print(bmi_categories)
 
-  # Flag patients with BMI <30
-  low_bmi_patients <- bmi_baseline %>%
-    filter(bmi < 30)
+    # Flag patients with BMI <30
+    low_bmi_patients <- bmi_baseline %>%
+      filter(bmi < 30)
 
-  if (nrow(low_bmi_patients) > 0) {
-    cat(sprintf("\n⚠️  WARNING: %d patients have BMI <30 but are in obesity cohort!\n", nrow(low_bmi_patients)))
-    cat("These should be investigated:\n")
-    print(low_bmi_patients %>% select(person_id, bmi))
+    if (nrow(low_bmi_patients) > 0) {
+      cat(sprintf("\n⚠️  WARNING: %d patients have BMI <30 but are in obesity cohort!\n", nrow(low_bmi_patients)))
+      cat("These should be investigated:\n")
+      print(low_bmi_patients %>% select(person_id, bmi))
+    }
+  } else {
+    cat("No BMI data found for low-weight patients in baseline period.\n")
   }
 } else {
   cat("WARNING: bmi_data not found in RData file\n")
-  # Create empty bmi_baseline to prevent errors downstream
-  bmi_baseline <- tibble(person_id = integer(), bmi = numeric(), measurement_date = as.Date(character()))
+  cat("Cannot perform BMI verification.\n")
 }
 
 # =============================================================================
