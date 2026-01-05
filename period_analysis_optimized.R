@@ -136,7 +136,7 @@ period_1_90d_activity <- activity_with_glp1 %>%
          days_from_initiation <= 90,
          is_valid_day == TRUE) %>%  # WEAR TIME: only valid days (≥10h)
   group_by(person_id) %>%
-  filter(n() >= 4) %>%  # INCREASED FROM 3: require ≥4 valid days
+  filter(n() >= 7) %>%  # NOISE REDUCTION: require ≥7 valid days
   summarize(
     period_steps = mean(steps, na.rm = TRUE),
     period_sedentary = mean(sedentary_minutes, na.rm = TRUE),
@@ -157,11 +157,13 @@ period_1_90d_activity <- activity_with_glp1 %>%
   )
 
 # Get 1-90d weight separately (OPTIONAL - for those who have it)
+# Require ≥2 measurements for reliability
 period_1_90d_weight <- weight_with_glp1 %>%
   filter(days_from_initiation >= 1,
          days_from_initiation <= 90,
          !is.na(weight_kg)) %>%
   group_by(person_id) %>%
+  filter(n() >= 2) %>%  # Require at least 2 measurements
   summarize(period_weight = min(weight_kg, na.rm = TRUE), .groups = "drop")
 
 # Check active treatment at midpoint (day 45)
@@ -216,7 +218,7 @@ for (window_name in names(baseline_windows)) {
            days_from_initiation <= window[2],
            is_valid_day == TRUE) %>%  # WEAR TIME: only valid days (≥10h)
     group_by(person_id) %>%
-    filter(n() >= 4) %>%  # INCREASED FROM 3: require ≥4 valid days
+    filter(n() >= 7) %>%  # NOISE REDUCTION: require ≥7 valid days
     summarize(
       baseline_steps = mean(steps, na.rm = TRUE),
       baseline_sedentary = mean(sedentary_minutes, na.rm = TRUE),
@@ -237,12 +239,14 @@ for (window_name in names(baseline_windows)) {
     )
 
   # Get baseline weight (HIGHEST) for patients with 1-90d data
+  # Require ≥2 measurements for reliability
   baseline_weight <- weight_with_glp1 %>%
     filter(person_id %in% patients_with_1_90d,
            days_from_initiation >= window[1],
            days_from_initiation <= window[2],
            !is.na(weight_kg)) %>%
     group_by(person_id) %>%
+    filter(n() >= 2) %>%  # Require at least 2 measurements
     summarize(baseline_weight = max(weight_kg, na.rm = TRUE), .groups = "drop")
 
   # Combine baseline activity + weight (require BOTH)
@@ -353,7 +357,7 @@ for (period_name in names(time_periods)) {
            days_from_initiation <= end_day,
            is_valid_day == TRUE) %>%  # WEAR TIME: only valid days (≥10h)
     group_by(person_id) %>%
-    filter(n() >= 4) %>%  # INCREASED FROM 3: require ≥4 valid days
+    filter(n() >= 7) %>%  # NOISE REDUCTION: require ≥7 valid days
     summarize(
       period_steps = mean(steps, na.rm = TRUE),
       period_sedentary = mean(sedentary_minutes, na.rm = TRUE),
@@ -374,12 +378,14 @@ for (period_name in names(time_periods)) {
     )
 
   # Weight data - LOWEST weight (OPTIONAL)
+  # Require ≥2 measurements for reliability
   weight_period <- weight_with_glp1 %>%
     filter(person_id %in% final_cohort_ids,
            days_from_initiation >= start_day,
            days_from_initiation <= end_day,
            !is.na(weight_kg)) %>%
     group_by(person_id) %>%
+    filter(n() >= 2) %>%  # Require at least 2 measurements
     summarize(period_weight = min(weight_kg, na.rm = TRUE), .groups = "drop")
 
   # Check active treatment at midpoint (for patients with activity data)
@@ -475,7 +481,7 @@ nadir_activity <- nadir_with_active_check %>%
   filter(abs(days_from_nadir) <= 30,  # ±30 days from nadir
          is_valid_day == TRUE) %>%  # WEAR TIME: only valid days (≥10h)
   group_by(person_id) %>%
-  filter(n() >= 4) %>%  # INCREASED FROM 3: require ≥4 valid days
+  filter(n() >= 7) %>%  # NOISE REDUCTION: require ≥7 valid days
   summarize(
     nadir_steps = mean(steps, na.rm = TRUE),
     nadir_sedentary = mean(sedentary_minutes, na.rm = TRUE),
@@ -985,7 +991,7 @@ period_1_30d_activity <- activity_with_glp1 %>%
          days_from_initiation <= 30,
          is_valid_day == TRUE) %>%  # WEAR TIME: only valid days (≥10h)
   group_by(person_id) %>%
-  filter(n() >= 4) %>%  # INCREASED FROM 3: require ≥4 valid days
+  filter(n() >= 7) %>%  # NOISE REDUCTION: require ≥7 valid days
   summarize(
     period_steps = mean(steps, na.rm = TRUE),
     period_sedentary = mean(sedentary_minutes, na.rm = TRUE),
@@ -1010,6 +1016,7 @@ period_1_30d_weight <- weight_with_glp1 %>%
          days_from_initiation <= 30,
          !is.na(weight_kg)) %>%
   group_by(person_id) %>%
+  filter(n() >= 2) %>%  # Require at least 2 measurements
   summarize(period_weight = min(weight_kg, na.rm = TRUE), .groups = "drop")
 
 # Check active treatment at midpoint (day 15)
@@ -1059,7 +1066,7 @@ for (window_name in names(baseline_windows)) {
            days_from_initiation <= window[2],
            is_valid_day == TRUE) %>%  # WEAR TIME: only valid days (≥10h)
     group_by(person_id) %>%
-    filter(n() >= 4) %>%  # INCREASED FROM 3: require ≥4 valid days
+    filter(n() >= 7) %>%  # NOISE REDUCTION: require ≥7 valid days
     summarize(
       baseline_steps = mean(steps, na.rm = TRUE),
       baseline_sedentary = mean(sedentary_minutes, na.rm = TRUE),
@@ -1085,6 +1092,7 @@ for (window_name in names(baseline_windows)) {
            days_from_initiation <= window[2],
            !is.na(weight_kg)) %>%
     group_by(person_id) %>%
+    filter(n() >= 2) %>%  # Require at least 2 measurements
     summarize(baseline_weight = max(weight_kg, na.rm = TRUE), .groups = "drop")
 
   baseline_combined <- baseline_activity %>%
@@ -1157,7 +1165,7 @@ for (period_name in names(time_periods_short)) {
            days_from_initiation <= end_day,
            is_valid_day == TRUE) %>%  # WEAR TIME: only valid days (≥10h)
     group_by(person_id) %>%
-    filter(n() >= 4) %>%  # INCREASED FROM 3: require ≥4 valid days
+    filter(n() >= 7) %>%  # NOISE REDUCTION: require ≥7 valid days
     summarize(
       period_steps = mean(steps, na.rm = TRUE),
       period_sedentary = mean(sedentary_minutes, na.rm = TRUE),
@@ -1183,6 +1191,7 @@ for (period_name in names(time_periods_short)) {
            days_from_initiation <= end_day,
            !is.na(weight_kg)) %>%
     group_by(person_id) %>%
+    filter(n() >= 2) %>%  # Require at least 2 measurements
     summarize(period_weight = min(weight_kg, na.rm = TRUE), .groups = "drop")
 
   patients_period_fills <- drug_glp1_clean %>%
@@ -1255,7 +1264,7 @@ nadir_activity_short <- nadir_with_active_short %>%
   filter(abs(days_from_nadir) <= 30,
          is_valid_day == TRUE) %>%  # WEAR TIME: only valid days (≥10h)
   group_by(person_id) %>%
-  filter(n() >= 4) %>%  # INCREASED FROM 3: require ≥4 valid days
+  filter(n() >= 7) %>%  # NOISE REDUCTION: require ≥7 valid days
   summarize(
     nadir_steps = mean(steps, na.rm = TRUE),
     nadir_sedentary = mean(sedentary_minutes, na.rm = TRUE),
