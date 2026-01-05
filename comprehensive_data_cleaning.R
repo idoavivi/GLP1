@@ -209,15 +209,28 @@ obesity_sql <- paste("
     SELECT DISTINCT
         person_id
     FROM `condition_occurrence`
-    WHERE condition_concept_id IN (
-        SELECT DISTINCT ca.descendant_id
-        FROM `cb_criteria_ancestor` ca
-        JOIN (
-            SELECT DISTINCT c.concept_id
-            FROM `cb_criteria` c
-            WHERE concept_id IN (433736)  -- Obesity concept
-                AND is_standard = 1
-        ) b ON ca.ancestor_id = b.concept_id
+    WHERE (
+        -- Method 1: Standard concept IDs for obesity
+        condition_concept_id IN (
+            433736,   -- Obesity (SNOMED)
+            4058243,  -- Obesity due to excess calories
+            4102901,  -- Morbid obesity
+            435928,   -- Overweight
+            4059290,  -- Severe obesity
+            443343,   -- Generalized obesity
+            4340390,  -- Obesity disorder
+            4340604   -- Abdominal obesity
+        )
+        -- Method 2: ICD-10 source codes (E66.x - Overweight and obesity)
+        OR condition_source_value LIKE 'E66%'
+        -- Method 3: ICD-9 source codes (278.0x - Overweight and obesity)
+        OR condition_source_value LIKE '278.0%'
+        -- Method 4: Use ancestor hierarchy
+        OR condition_concept_id IN (
+            SELECT DISTINCT descendant_concept_id
+            FROM `concept_ancestor`
+            WHERE ancestor_concept_id = 433736  -- Obesity parent concept
+        )
     )
     AND PERSON_ID IN (SELECT distinct person_id
         FROM `cb_search_person`
