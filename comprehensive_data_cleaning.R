@@ -257,10 +257,21 @@ cat("========================================\n\n")
 weight_with_glp1 <- weight_raw %>%
   mutate(
     measurement_date = as.Date(measurement_datetime),
-    weight_kg = value_as_number * 0.453592  # Convert lbs to kg
+    # Handle different units: 8739 = pounds, 9529 = kg
+    weight_kg = case_when(
+      unit_concept_id == 8739 ~ value_as_number * 0.453592,  # Convert pounds to kg
+      unit_concept_id == 9529 ~ value_as_number,             # Already in kg
+      is.na(unit_concept_id) ~ value_as_number * 0.453592,   # Default: assume pounds
+      TRUE ~ value_as_number * 0.453592                       # Default: assume pounds
+    )
   ) %>%
   inner_join(glp1_initiation, by = "person_id") %>%
   mutate(days_from_initiation = as.numeric(difftime(measurement_date, glp1_initiation_date, units = "days")))
+
+# Show unit distribution
+cat("Weight unit distribution:\n")
+print(weight_with_glp1 %>% count(unit_concept_id, sort = TRUE))
+cat("\n")
 
 n_weight_raw <- nrow(weight_with_glp1)
 
@@ -327,17 +338,25 @@ cat("========================================\n")
 cat("STEP 5: Processing height and BMI\n")
 cat("========================================\n\n")
 
-# Clean height (convert inches to cm, filter extremes)
+# Clean height (handle different units, filter extremes)
 height_clean <- height_raw %>%
   mutate(
-    height_cm = value_as_number * 2.54,  # Convert inches to cm
-    measurement_date = as.Date(measurement_datetime)
+    measurement_date = as.Date(measurement_datetime),
+    # Handle different units: 8582 = inches, 9330 = cm
+    height_cm = case_when(
+      unit_concept_id == 8582 ~ value_as_number * 2.54,  # Convert inches to cm
+      unit_concept_id == 9330 ~ value_as_number,         # Already in cm
+      is.na(unit_concept_id) ~ value_as_number * 2.54,   # Default: assume inches
+      TRUE ~ value_as_number * 2.54                       # Default: assume inches
+    )
   ) %>%
   filter(!is.na(height_cm), height_cm >= 100, height_cm <= 220) %>%
   group_by(person_id) %>%
   summarize(height_cm = median(height_cm), .groups = "drop")  # Take median height per person
 
-cat(sprintf("Height data: %d → %d patients (filtered 100-220 cm)\n",
+cat("Height unit distribution:\n")
+print(height_raw %>% count(unit_concept_id, sort = TRUE))
+cat(sprintf("\nHeight data: %d → %d patients (filtered 100-220 cm)\n",
             nrow(height_raw), nrow(height_clean)))
 
 # Clean BMI measurements
