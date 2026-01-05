@@ -108,39 +108,48 @@ cat("\n========================================\n")
 cat("ANALYSIS 2: Height Distribution\n")
 cat("========================================\n\n")
 
-# Calculate height from weight and BMI
-low_weight_with_bmi <- baseline_weights %>%
-  filter(person_id %in% low_weight_patients) %>%
-  left_join(bmi_baseline, by = "person_id") %>%
-  filter(!is.na(bmi)) %>%
-  mutate(
-    # BMI = weight(kg) / (height(m))^2
-    # height(m) = sqrt(weight / BMI)
-    calculated_height_cm = 100 * sqrt(baseline_weight / bmi)
-  )
-
-cat("Calculated height for <100 kg patients:\n")
-cat(sprintf("  Mean height: %.1f cm\n", mean(low_weight_with_bmi$calculated_height_cm, na.rm = TRUE)))
-cat(sprintf("  Median height: %.1f cm\n", median(low_weight_with_bmi$calculated_height_cm, na.rm = TRUE)))
-cat(sprintf("  Min height: %.1f cm\n", min(low_weight_with_bmi$calculated_height_cm, na.rm = TRUE)))
-cat(sprintf("  Max height: %.1f cm\n", max(low_weight_with_bmi$calculated_height_cm, na.rm = TRUE)))
-
-height_categories <- low_weight_with_bmi %>%
-  mutate(
-    height_category = case_when(
-      calculated_height_cm < 145 ~ "<145 cm (Very short - dwarfism?)",
-      calculated_height_cm < 155 ~ "145-155 cm (Short)",
-      calculated_height_cm < 165 ~ "155-165 cm (Average for women)",
-      calculated_height_cm < 175 ~ "165-175 cm (Tall for women/average for men)",
-      TRUE ~ "≥175 cm (Tall)"
+# Only run if we have BMI data
+if (nrow(bmi_baseline) > 0) {
+  # Calculate height from weight and BMI
+  low_weight_with_bmi <- baseline_weights %>%
+    filter(person_id %in% low_weight_patients) %>%
+    left_join(bmi_baseline, by = "person_id") %>%
+    filter(!is.na(bmi)) %>%
+    mutate(
+      # BMI = weight(kg) / (height(m))^2
+      # height(m) = sqrt(weight / BMI)
+      calculated_height_cm = 100 * sqrt(baseline_weight / bmi)
     )
-  ) %>%
-  count(height_category) %>%
-  mutate(percent = 100 * n / sum(n)) %>%
-  arrange(desc(percent))
 
-cat("\nHeight distribution:\n")
-print(height_categories)
+  if (nrow(low_weight_with_bmi) > 0) {
+    cat("Calculated height for <100 kg patients:\n")
+    cat(sprintf("  Mean height: %.1f cm\n", mean(low_weight_with_bmi$calculated_height_cm, na.rm = TRUE)))
+    cat(sprintf("  Median height: %.1f cm\n", median(low_weight_with_bmi$calculated_height_cm, na.rm = TRUE)))
+    cat(sprintf("  Min height: %.1f cm\n", min(low_weight_with_bmi$calculated_height_cm, na.rm = TRUE)))
+    cat(sprintf("  Max height: %.1f cm\n", max(low_weight_with_bmi$calculated_height_cm, na.rm = TRUE)))
+
+    height_categories <- low_weight_with_bmi %>%
+      mutate(
+        height_category = case_when(
+          calculated_height_cm < 145 ~ "<145 cm (Very short - dwarfism?)",
+          calculated_height_cm < 155 ~ "145-155 cm (Short)",
+          calculated_height_cm < 165 ~ "155-165 cm (Average for women)",
+          calculated_height_cm < 175 ~ "165-175 cm (Tall for women/average for men)",
+          TRUE ~ "≥175 cm (Tall)"
+        )
+      ) %>%
+      count(height_category) %>%
+      mutate(percent = 100 * n / sum(n)) %>%
+      arrange(desc(percent))
+
+    cat("\nHeight distribution:\n")
+    print(height_categories)
+  } else {
+    cat("No BMI data available for height calculation.\n")
+  }
+} else {
+  cat("Skipping height verification - no BMI data available.\n")
+}
 
 # =============================================================================
 # ANALYSIS 3: OBESITY DIAGNOSIS
@@ -166,21 +175,39 @@ cat("========================================\n")
 cat("ANALYSIS 4: Detailed Review\n")
 cat("========================================\n\n")
 
-# Combine all data for detailed review
-detailed_review <- baseline_weights %>%
-  filter(person_id %in% low_weight_patients) %>%
-  left_join(bmi_baseline %>% select(person_id, baseline_bmi = bmi), by = "person_id") %>%
-  left_join(low_weight_inclusion %>% select(person_id, inclusion_reason), by = "person_id") %>%
-  mutate(
-    calculated_height_cm = 100 * sqrt(baseline_weight / baseline_bmi),
-    issue_flag = case_when(
-      baseline_bmi < 30 & inclusion_reason == "BMI ≥ 30" ~ "BMI <30 but included via BMI criterion!",
-      baseline_weight < 70 ~ "Weight <70 kg (impossible for BMI≥30 unless <153cm)",
-      baseline_weight < 80 & baseline_bmi >= 30 ~ "Very short (<164cm) for BMI≥30",
-      TRUE ~ "OK (short but valid)"
-    )
-  ) %>%
-  arrange(baseline_weight)
+# Only run if we have BMI data
+if (nrow(bmi_baseline) > 0) {
+  # Combine all data for detailed review
+  detailed_review <- baseline_weights %>%
+    filter(person_id %in% low_weight_patients) %>%
+    left_join(bmi_baseline %>% select(person_id, baseline_bmi = bmi), by = "person_id") %>%
+    left_join(low_weight_inclusion %>% select(person_id, inclusion_reason), by = "person_id") %>%
+    mutate(
+      calculated_height_cm = 100 * sqrt(baseline_weight / baseline_bmi),
+      issue_flag = case_when(
+        baseline_bmi < 30 & inclusion_reason == "BMI ≥ 30" ~ "BMI <30 but included via BMI criterion!",
+        baseline_weight < 70 ~ "Weight <70 kg (impossible for BMI≥30 unless <153cm)",
+        baseline_weight < 80 & baseline_bmi >= 30 ~ "Very short (<164cm) for BMI≥30",
+        TRUE ~ "OK (short but valid)"
+      )
+    ) %>%
+    arrange(baseline_weight)
+} else {
+  # Create minimal detailed_review without BMI data
+  detailed_review <- baseline_weights %>%
+    filter(person_id %in% low_weight_patients) %>%
+    left_join(low_weight_inclusion %>% select(person_id, inclusion_reason), by = "person_id") %>%
+    mutate(
+      baseline_bmi = NA_real_,
+      calculated_height_cm = NA_real_,
+      issue_flag = case_when(
+        baseline_weight < 70 ~ "Weight <70 kg (impossible for BMI≥30 unless <153cm)",
+        baseline_weight < 80 ~ "Weight 70-80 kg (very short required)",
+        TRUE ~ "Cannot verify without BMI data"
+      )
+    ) %>%
+    arrange(baseline_weight)
+}
 
 cat("Most problematic cases (sorted by weight):\n")
 print(detailed_review %>%
