@@ -350,14 +350,66 @@ height_clean <- height_raw %>%
       TRUE ~ value_as_number * 2.54                       # Default: assume inches
     )
   ) %>%
-  filter(!is.na(height_cm), height_cm >= 100, height_cm <= 220) %>%
+  filter(!is.na(height_cm), height_cm >= 150, height_cm <= 220) %>%
   group_by(person_id) %>%
   summarize(height_cm = median(height_cm), .groups = "drop")  # Take median height per person
 
 cat("Height unit distribution:\n")
 print(height_raw %>% count(unit_concept_id, sort = TRUE))
-cat(sprintf("\nHeight data: %d → %d patients (filtered 100-220 cm)\n",
+cat(sprintf("\nHeight data from measurements: %d → %d patients (filtered 150-220 cm)\n",
             nrow(height_raw), nrow(height_clean)))
+
+# =============================================================================
+# CALCULATE HEIGHT FROM HISTORICAL BMI + WEIGHT PAIRS
+# =============================================================================
+# For patients missing direct height measurements, calculate from any
+# historical BMI + weight pair where both were measured on the same date
+
+cat("\nCalculating additional heights from BMI + weight pairs...\n")
+
+# Get patients who don't have height yet
+patients_missing_height <- setdiff(weight_cleaned$person_id, height_clean$person_id)
+cat(sprintf("  Patients without direct height measurement: %d\n", length(patients_missing_height)))
+
+if (length(patients_missing_height) > 0) {
+  # Match weight and BMI measurements by person and date
+  weight_bmi_pairs <- weight_cleaned %>%
+    filter(person_id %in% patients_missing_height) %>%
+    inner_join(
+      bmi_measured %>% select(person_id, measurement_date, bmi),
+      by = c("person_id", "measurement_date")
+    ) %>%
+    filter(!is.na(bmi), bmi > 0, weight_kg > 0) %>%
+    mutate(
+      # BMI = weight(kg) / (height(m))^2
+      # height(cm) = 100 * sqrt(weight / BMI)
+      height_cm = 100 * sqrt(weight_kg / bmi)
+    ) %>%
+    filter(height_cm >= 150, height_cm <= 220)  # Apply same filters
+
+  cat(sprintf("  Matched BMI + weight pairs: %d\n", nrow(weight_bmi_pairs)))
+
+  if (nrow(weight_bmi_pairs) > 0) {
+    # Calculate median height per person (handles measurement errors)
+    height_calculated <- weight_bmi_pairs %>%
+      group_by(person_id) %>%
+      summarize(
+        height_cm = median(height_cm),
+        n_measurements = n(),
+        .groups = "drop"
+      )
+
+    # Combine with direct measurements
+    height_clean <- bind_rows(
+      height_clean,
+      height_calculated %>% select(person_id, height_cm)
+    )
+
+    cat(sprintf("  Additional heights calculated: %d patients\n", nrow(height_calculated)))
+  }
+}
+
+cat(sprintf("Total height data: %d patients\n\n", nrow(height_clean)))
 
 # Clean BMI measurements
 bmi_measured <- bmi_raw %>%
@@ -438,6 +490,73 @@ cat(sprintf("\nTotal obesity cohort: %d patients\n\n", nrow(obesity_cohort)))
 cat("Cohort composition:\n")
 print(table(obesity_cohort$inclusion_reason))
 cat("\n")
+
+# =============================================================================
+# VALIDATE BASELINE BMI FOR COHORT
+# =============================================================================
+
+cat("Validating baseline BMI for all cohort patients...\n\n")
+
+# Calculate baseline BMI using height + weight for verification
+baseline_bmi_validation <- weight_cleaned %>%
+  filter(person_id %in% obesity_cohort$person_id) %>%
+  inner_join(glp1_initiation, by = "person_id") %>%
+  mutate(days_from_initiation = as.numeric(difftime(measurement_date, glp1_initiation_date, units = "days"))) %>%
+  filter(days_from_initiation >= -180, days_from_initiation <= 0) %>%
+  group_by(person_id) %>%
+  filter(n() >= 2) %>%
+  summarize(baseline_weight = max(weight_kg), .groups = "drop") %>%
+  inner_join(height_clean, by = "person_id") %>%
+  mutate(
+    baseline_bmi = baseline_weight / ((height_cm / 100)^2)
+  )
+
+cat(sprintf("Patients with verifiable baseline BMI: %d / %d\n",
+            nrow(baseline_bmi_validation), nrow(obesity_cohort)))
+
+# Identify patients included via "BMI ≥ 30" but have BMI <30 at baseline
+invalid_bmi_inclusions <- obesity_cohort %>%
+  filter(inclusion_reason == "BMI ≥ 30") %>%
+  left_join(baseline_bmi_validation, by = "person_id") %>%
+  filter(!is.na(baseline_bmi), baseline_bmi < 30)
+
+if (nrow(invalid_bmi_inclusions) > 0) {
+  cat(sprintf("\n⚠️  WARNING: %d patients included via 'BMI ≥ 30' have baseline BMI <30\n",
+              nrow(invalid_bmi_inclusions)))
+  cat("Excluding these patients from cohort...\n")
+  cat(sprintf("  Mean baseline BMI of excluded: %.1f\n", mean(invalid_bmi_inclusions$baseline_bmi)))
+  cat(sprintf("  Range: %.1f - %.1f\n\n",
+              min(invalid_bmi_inclusions$baseline_bmi),
+              max(invalid_bmi_inclusions$baseline_bmi)))
+
+  # Exclude these patients
+  obesity_cohort <- obesity_cohort %>%
+    anti_join(invalid_bmi_inclusions %>% select(person_id), by = "person_id")
+
+  cat(sprintf("Updated obesity cohort: %d patients\n\n", nrow(obesity_cohort)))
+} else {
+  cat("✓ All patients included via 'BMI ≥ 30' have verified baseline BMI ≥30\n\n")
+}
+
+# Additional exclusion: Patients with BMI <30 at baseline (strict option)
+patients_low_bmi <- baseline_bmi_validation %>%
+  filter(baseline_bmi < 30)
+
+if (nrow(patients_low_bmi) > 0) {
+  cat(sprintf("Additional patients with baseline BMI <30 (any inclusion reason): %d\n",
+              nrow(patients_low_bmi)))
+  cat("These were likely included via 'Obesity diagnosis' but lost weight before GLP-1\n")
+  cat("EXCLUDING all patients with baseline BMI <30 for data quality...\n\n")
+
+  obesity_cohort <- obesity_cohort %>%
+    anti_join(patients_low_bmi %>% select(person_id), by = "person_id")
+
+  cat(sprintf("Final obesity cohort after BMI validation: %d patients\n\n", nrow(obesity_cohort)))
+
+  cat("Final cohort composition:\n")
+  print(table(obesity_cohort$inclusion_reason))
+  cat("\n")
+}
 
 # =============================================================================
 # STEP 7: LOAD AND CLEAN ACTIVITY DATA
