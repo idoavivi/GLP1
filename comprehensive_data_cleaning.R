@@ -356,11 +356,21 @@ height_clean <- height_raw %>%
 
 cat("Height unit distribution:\n")
 print(height_raw %>% count(unit_concept_id, sort = TRUE))
-cat(sprintf("\nHeight data from measurements: %d → %d patients (filtered 150-220 cm)\n",
+cat(sprintf("\nHeight data from direct measurements: %d → %d patients (filtered 150-220 cm)\n",
             nrow(height_raw), nrow(height_clean)))
 
+# Clean BMI measurements
+bmi_measured <- bmi_raw %>%
+  mutate(measurement_date = as.Date(measurement_datetime)) %>%
+  filter(!is.na(value_as_number), value_as_number >= 18, value_as_number <= 80) %>%
+  inner_join(glp1_initiation, by = "person_id") %>%
+  mutate(days_from_initiation = as.numeric(difftime(measurement_date, glp1_initiation_date, units = "days"))) %>%
+  rename(bmi = value_as_number)
+
+cat(sprintf("BMI measurements: %d (filtered 18-80)\n", nrow(bmi_measured)))
+
 # =============================================================================
-# CALCULATE HEIGHT FROM HISTORICAL BMI + WEIGHT PAIRS
+# CALCULATE ADDITIONAL HEIGHT FROM HISTORICAL BMI + WEIGHT PAIRS
 # =============================================================================
 # For patients missing direct height measurements, calculate from any
 # historical BMI + weight pair where both were measured on the same date
@@ -410,16 +420,6 @@ if (length(patients_missing_height) > 0) {
 }
 
 cat(sprintf("Total height data: %d patients\n\n", nrow(height_clean)))
-
-# Clean BMI measurements
-bmi_measured <- bmi_raw %>%
-  mutate(measurement_date = as.Date(measurement_datetime)) %>%
-  filter(!is.na(value_as_number), value_as_number >= 18, value_as_number <= 80) %>%
-  inner_join(glp1_initiation, by = "person_id") %>%
-  mutate(days_from_initiation = as.numeric(difftime(measurement_date, glp1_initiation_date, units = "days"))) %>%
-  rename(bmi = value_as_number)
-
-cat(sprintf("BMI measurements: %d (filtered 18-80)\n", nrow(bmi_measured)))
 
 # Calculate BMI from weight and height where measured BMI not available
 weight_height_for_bmi <- weight_cleaned %>%
