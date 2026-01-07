@@ -17,6 +17,41 @@ cat("##################################################\n\n")
 # Load cleaned data
 load("glp1_cleaned_data.RData")
 
+# Check what variables are in the RData file and adapt
+cat("Available objects in RData file:\n")
+cat(paste(ls(), collapse=", "), "\n\n")
+
+if (!exists("weight_cleaned")) {
+  if (exists("weight_with_glp1")) {
+    weight_cleaned <- weight_with_glp1
+    cat("Using 'weight_with_glp1' variable from RData file\n")
+  } else if (exists("weight_final")) {
+    weight_cleaned <- weight_final
+    cat("Using 'weight_final' variable from RData file\n")
+  } else {
+    stop("ERROR: No weight data found in RData file!")
+  }
+}
+
+if (!exists("activity_cleaned")) {
+  if (exists("activity_with_glp1")) {
+    activity_cleaned <- activity_with_glp1
+    cat("Using 'activity_with_glp1' variable from RData file\n")
+  } else if (exists("activity_final")) {
+    activity_cleaned <- activity_final
+    cat("Using 'activity_final' variable from RData file\n")
+  } else {
+    stop("ERROR: No activity data found in RData file!")
+  }
+}
+
+if (!exists("drug_glp1_clean") && exists("drug_final")) {
+  drug_glp1_clean <- drug_final
+  cat("Using 'drug_final' variable from RData file\n")
+}
+
+cat("\n")
+
 # Filter to obesity cohort
 final_person_ids <- obesity_cohort$person_id
 

@@ -14,11 +14,42 @@ cat("##################################################\n\n")
 # Load cleaned data
 load("glp1_cleaned_data.RData")
 
+# Check what variables are in the RData file and adapt
+cat("Available objects in RData file:\n")
+cat(paste(ls(), collapse=", "), "\n\n")
+
+if (!exists("weight_cleaned")) {
+  if (exists("weight_with_glp1")) {
+    weight_cleaned <- weight_with_glp1
+    cat("Using 'weight_with_glp1' variable from RData file\n")
+  } else if (exists("weight_final")) {
+    weight_cleaned <- weight_final
+    cat("Using 'weight_final' variable from RData file\n")
+  } else {
+    stop("ERROR: No weight data found in RData file!\nAvailable objects: ", paste(ls(), collapse=", "))
+  }
+}
+
+if (!exists("bmi_data")) {
+  if (exists("bmi_final")) {
+    bmi_data <- bmi_final
+    cat("Using 'bmi_final' variable from RData file\n")
+  } else if (exists("bmi_all")) {
+    bmi_data <- bmi_all
+    cat("Using 'bmi_all' variable from RData file\n")
+  }
+}
+
+cat("\n")
+
 # Filter to obesity cohort
 final_person_ids <- obesity_cohort$person_id
 
-weight_with_glp1 <- weight_cleaned %>%
-  filter(person_id %in% final_person_ids)
+# Ensure weight_with_glp1 is filtered to obesity cohort
+if (exists("weight_cleaned")) {
+  weight_with_glp1 <- weight_cleaned %>%
+    filter(person_id %in% final_person_ids)
+}
 
 # Get baseline weights
 baseline_weights <- weight_with_glp1 %>%
