@@ -20,6 +20,43 @@ cat("Loading cleaned data...\n")
 load("cleaned_glp1_cohort.RData")
 
 # =============================================================================
+# EXCLUDE PATIENTS WITH BASELINE BMI < 30
+# =============================================================================
+
+cat("\n========================================\n")
+cat("Filtering: Exclude BMI < 30 patients\n")
+cat("========================================\n\n")
+
+# Calculate baseline BMI for each patient
+baseline_bmi_check <- bmi_measured %>%
+  filter(days_from_initiation >= -180, days_from_initiation <= 0) %>%
+  group_by(person_id) %>%
+  summarize(baseline_bmi = mean(bmi, na.rm = TRUE), .groups = "drop")
+
+# Identify patients to exclude
+patients_to_exclude <- baseline_bmi_check %>%
+  filter(baseline_bmi < 30) %>%
+  pull(person_id)
+
+cat(sprintf("Patients with baseline BMI < 30: %d\n", length(patients_to_exclude)))
+
+if(length(patients_to_exclude) > 0) {
+  cat("Excluding these patients from all analyses...\n")
+
+  # Filter all datasets
+  activity_all <- activity_all %>%
+    filter(!person_id %in% patients_to_exclude)
+
+  weight_all <- weight_all %>%
+    filter(!person_id %in% patients_to_exclude)
+
+  bmi_measured <- bmi_measured %>%
+    filter(!person_id %in% patients_to_exclude)
+
+  cat(sprintf("Remaining patients: %d\n", length(unique(activity_all$person_id))))
+}
+
+# =============================================================================
 # PART 1: CALCULATE NADIR WEIGHT FOR EACH PATIENT
 # =============================================================================
 
