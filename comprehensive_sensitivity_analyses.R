@@ -16,7 +16,22 @@ cat("##################################################\n\n")
 
 # Load cleaned data
 cat("Loading cleaned data...\n")
-load("cleaned_glp1_cohort.RData")
+load("glp1_cleaned_data.RData")
+
+# Prepare data with days from initiation
+cat("Preparing datasets with days from initiation...\n")
+
+activity_all <- activity_cleaned %>%
+  inner_join(glp1_initiation %>% select(person_id, initiation_date), by = "person_id") %>%
+  mutate(days_from_initiation = as.numeric(difftime(date, initiation_date, units = "days")))
+
+weight_all <- weight_cleaned %>%
+  inner_join(glp1_initiation %>% select(person_id, initiation_date), by = "person_id") %>%
+  mutate(days_from_initiation = as.numeric(difftime(measurement_date, initiation_date, units = "days")))
+
+bmi_measured <- bmi_data %>%
+  inner_join(glp1_initiation %>% select(person_id, initiation_date), by = "person_id") %>%
+  mutate(days_from_initiation = as.numeric(difftime(measurement_date, initiation_date, units = "days")))
 
 # =============================================================================
 # EXCLUDE PATIENTS WITH BASELINE BMI < 30
@@ -53,6 +68,8 @@ if(length(patients_to_exclude) > 0) {
     filter(!person_id %in% patients_to_exclude)
 
   cat(sprintf("Remaining patients: %d\n", length(unique(activity_all$person_id))))
+} else {
+  cat("All patients have baseline BMI ≥ 30. No exclusions needed.\n")
 }
 
 # =============================================================================
