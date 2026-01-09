@@ -9,6 +9,8 @@ library(tidyverse)
 library(lubridate)
 library(lme4)
 library(lmerTest)
+library(knitr)
+library(kableExtra)
 
 cat("\n##################################################\n")
 cat("PRIMARY ANALYSIS\n")
@@ -355,6 +357,15 @@ print(table1_summary)
 write_csv(table1_summary, "table1_baseline_characteristics.csv")
 cat("\nSaved: table1_baseline_characteristics.csv\n")
 
+# Save as HTML
+table1_html <- table1_summary %>%
+  kable(format = "html", escape = FALSE) %>%
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed"),
+                full_width = FALSE)
+
+writeLines(as.character(table1_html), "table1_baseline_characteristics.html")
+cat("Saved: table1_baseline_characteristics.html\n")
+
 # =============================================================================
 # TABLE 2: LONGITUDINAL OUTCOMES
 # =============================================================================
@@ -616,6 +627,22 @@ write_csv(activity_table, "table2_activity_outcomes.csv")
 cat("\nSaved: table2_weight_outcomes.csv\n")
 cat("Saved: table2_activity_outcomes.csv\n")
 
+# Save as HTML with p-value notes
+weight_html <- weight_table_with_note %>%
+  kable(format = "html", escape = FALSE) %>%
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed"),
+                full_width = FALSE)
+
+activity_html <- activity_table_with_notes %>%
+  kable(format = "html", escape = FALSE) %>%
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed"),
+                full_width = FALSE)
+
+writeLines(as.character(weight_html), "table2_weight_outcomes.html")
+writeLines(as.character(activity_html), "table2_activity_outcomes.html")
+cat("Saved: table2_weight_outcomes.html\n")
+cat("Saved: table2_activity_outcomes.html\n")
+
 # =============================================================================
 # TABLE 3: DETAILED MIXED EFFECTS RESULTS
 # =============================================================================
@@ -701,6 +728,15 @@ print(mixed_effects_summary)
 write_csv(mixed_effects_summary, "table3_mixed_effects_models.csv")
 cat("Saved: table3_mixed_effects_models.csv\n")
 
+# Save as HTML
+table3_html <- mixed_effects_summary %>%
+  kable(format = "html", escape = FALSE) %>%
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed"),
+                full_width = FALSE)
+
+writeLines(as.character(table3_html), "table3_mixed_effects_models.html")
+cat("Saved: table3_mixed_effects_models.html\n")
+
 # =============================================================================
 # SUMMARY
 # =============================================================================
@@ -713,7 +749,13 @@ cat("Cohort: Patients with baseline (-180 to 0d) AND 1-30d follow-up\n")
 cat(sprintf("  N = %d patients\n\n", nrow(baseline_cohort)))
 
 cat("Generated files:\n")
-cat("  - table1_baseline_characteristics.csv\n")
-cat("  - table2_weight_outcomes.csv\n")
-cat("  - table2_activity_outcomes.csv\n")
-cat("  - table3_mixed_effects_models.csv\n\n")
+cat("  CSV files:\n")
+cat("    - table1_baseline_characteristics.csv\n")
+cat("    - table2_weight_outcomes.csv\n")
+cat("    - table2_activity_outcomes.csv\n")
+cat("    - table3_mixed_effects_models.csv\n")
+cat("  HTML files (open in browser):\n")
+cat("    - table1_baseline_characteristics.html\n")
+cat("    - table2_weight_outcomes.html\n")
+cat("    - table2_activity_outcomes.html\n")
+cat("    - table3_mixed_effects_models.html\n\n")
