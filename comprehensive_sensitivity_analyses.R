@@ -95,7 +95,7 @@ activity_summary <- activity_periods %>%
         filter(n() >= 3) %>%  # At least 3 valid days
         summarize(
           steps = mean(steps, na.rm = TRUE),
-          active_minutes = mean(active_minutes, na.rm = TRUE),
+          active_minutes = mean(fairly_active_minutes + very_active_minutes, na.rm = TRUE),
           sedentary_minutes = mean(sedentary_minutes, na.rm = TRUE),
           activity_calories = mean(activity_calories, na.rm = TRUE),
           n_days = n(),
