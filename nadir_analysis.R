@@ -23,16 +23,16 @@ load("glp1_cleaned_data.RData")
 cat("Preparing datasets with days from initiation...\n")
 
 activity_all <- activity_cleaned %>%
-  inner_join(glp1_initiation %>% select(person_id, initiation_date), by = "person_id") %>%
-  mutate(days_from_initiation = as.numeric(difftime(date, initiation_date, units = "days")))
+  inner_join(glp1_initiation %>% select(person_id, glp1_initiation_date), by = "person_id") %>%
+  mutate(days_from_initiation = as.numeric(difftime(date, glp1_initiation_date, units = "days")))
 
 weight_all <- weight_cleaned %>%
-  inner_join(glp1_initiation %>% select(person_id, initiation_date), by = "person_id") %>%
-  mutate(days_from_initiation = as.numeric(difftime(measurement_date, initiation_date, units = "days")))
+  inner_join(glp1_initiation %>% select(person_id, glp1_initiation_date), by = "person_id") %>%
+  mutate(days_from_initiation = as.numeric(difftime(measurement_date, glp1_initiation_date, units = "days")))
 
 bmi_measured <- bmi_data %>%
-  inner_join(glp1_initiation %>% select(person_id, initiation_date), by = "person_id") %>%
-  mutate(days_from_initiation = as.numeric(difftime(measurement_date, initiation_date, units = "days")))
+  inner_join(glp1_initiation %>% select(person_id, glp1_initiation_date), by = "person_id") %>%
+  mutate(days_from_initiation = as.numeric(difftime(measurement_date, glp1_initiation_date, units = "days")))
 
 # =============================================================================
 # EXCLUDE PATIENTS WITH BASELINE BMI < 30
