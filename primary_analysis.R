@@ -156,7 +156,8 @@ prescription_fills <- drug_glp1_clean %>%
   summarize(n_prescriptions = n(), .groups = "drop")
 
 # Calculate demographics from person table if available
-if(exists("person")) {
+# Check if person exists and is a data frame (not a function)
+if(exists("person") && is.data.frame(person)) {
   demographics <- person %>%
     inner_join(glp1_initiation, by = "person_id") %>%
     mutate(
@@ -188,7 +189,7 @@ if(exists("person")) {
 }
 
 # Get diagnoses from obesity_cohort if available
-if(exists("obesity_cohort")) {
+if(exists("obesity_cohort") && is.data.frame(obesity_cohort)) {
   # Extract diagnoses from obesity_cohort
   diagnoses <- obesity_cohort %>%
     filter(person_id %in% baseline_cohort$person_id) %>%
@@ -218,7 +219,7 @@ if(exists("obesity_cohort")) {
 }
 
 # Calculate height if available
-if(exists("height_clean")) {
+if(exists("height_clean") && is.data.frame(height_clean)) {
   height_data <- height_clean
 } else {
   cat("Note: Height data not in RData. Calculating from weight and BMI...\n")
