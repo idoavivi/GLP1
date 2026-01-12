@@ -18,7 +18,19 @@ cat("##################################################\n\n")
 cat("Loading existing cohort...\n")
 load("glp1_cleaned_data.RData")
 
-cohort_person_ids <- glp1_initiation$person_id
+# Get person IDs from whichever object exists
+if (exists("obesity_cohort") && is.data.frame(obesity_cohort)) {
+  cohort_person_ids <- unique(obesity_cohort$person_id)
+} else if (exists("glp1_initiation") && is.data.frame(glp1_initiation)) {
+  cohort_person_ids <- unique(glp1_initiation$person_id)
+} else if (exists("weight_cleaned") && is.data.frame(weight_cleaned)) {
+  cohort_person_ids <- unique(weight_cleaned$person_id)
+} else if (exists("activity_cleaned") && is.data.frame(activity_cleaned)) {
+  cohort_person_ids <- unique(activity_cleaned$person_id)
+} else {
+  stop("Could not find cohort data in RData file")
+}
+
 cat(sprintf("Cohort size: %d patients\n\n", length(cohort_person_ids)))
 
 # =============================================================================
@@ -226,27 +238,44 @@ cat("PART 4: Saving Data\n")
 cat("========================================\n\n")
 
 # Update obesity_cohort if it exists
-if(exists("obesity_cohort")) {
+if(exists("obesity_cohort") && is.data.frame(obesity_cohort)) {
+  # Remove old diagnosis columns if they exist
   obesity_cohort <- obesity_cohort %>%
-    select(-contains("has_")) %>%  # Remove old diagnosis columns
+    select(-any_of(c("has_hypertension", "has_diabetes", "has_dyslipidemia",
+                     "has_ihd", "has_stroke", "has_osteoarthritis"))) %>%
     left_join(diagnoses, by = "person_id")
 } else {
   obesity_cohort <- diagnoses
 }
 
+# Build list of objects to save
+objects_to_save <- c("obesity_cohort", "person")
+
+# Add other objects if they exist
+if (exists("drug_glp1_clean") && is.data.frame(drug_glp1_clean)) {
+  objects_to_save <- c(objects_to_save, "drug_glp1_clean")
+}
+if (exists("glp1_initiation") && is.data.frame(glp1_initiation)) {
+  objects_to_save <- c(objects_to_save, "glp1_initiation")
+}
+if (exists("weight_cleaned") && is.data.frame(weight_cleaned)) {
+  objects_to_save <- c(objects_to_save, "weight_cleaned")
+}
+if (exists("activity_cleaned") && is.data.frame(activity_cleaned)) {
+  objects_to_save <- c(objects_to_save, "activity_cleaned")
+}
+if (exists("bmi_data") && is.data.frame(bmi_data)) {
+  objects_to_save <- c(objects_to_save, "bmi_data")
+}
+if (exists("period_assignments") && is.data.frame(period_assignments)) {
+  objects_to_save <- c(objects_to_save, "period_assignments")
+}
+
 # Save updated RData
-save(
-  drug_glp1_clean,
-  glp1_initiation,
-  weight_cleaned,
-  activity_cleaned,
-  bmi_data,
-  obesity_cohort,
-  person,
-  file = "glp1_cleaned_data.RData"
-)
+save(list = objects_to_save, file = "glp1_cleaned_data.RData")
 
 cat("Saved updated: glp1_cleaned_data.RData\n")
+cat(sprintf("  - Saved %d objects\n", length(objects_to_save)))
 cat("  - Added person demographics (age, sex, race, ethnicity)\n")
 cat("  - Added diagnoses (HTN, DM, dyslipidemia, IHD, CVA, OA)\n\n")
 
