@@ -14,6 +14,20 @@ cat("PULL DEMOGRAPHICS AND DIAGNOSES\n")
 cat("All of Us Workbench\n")
 cat("##################################################\n\n")
 
+# Helper function from comprehensive_data_cleaning.R
+read_bq_export_from_workspace_bucket <- function(export_path, col_types = NULL) {
+  bind_rows(
+    map(system2('gsutil', args = c('ls', export_path), stdout = TRUE, stderr = TRUE),
+        function(csv) {
+          message(str_glue('Loading {csv}.'))
+          chunk <- read_csv(pipe(str_glue('gsutil cat {csv}')), col_types = col_types, show_col_types = FALSE)
+          if (is.null(col_types)) {
+            col_types <- spec(chunk)
+          }
+          chunk
+        }))
+}
+
 # Load existing cohort to get patient IDs
 cat("Loading existing cohort...\n")
 load("glp1_cleaned_data.RData")
@@ -41,7 +55,10 @@ cat("========================================\n")
 cat("PART 1: Person Demographics\n")
 cat("========================================\n\n")
 
-person_sql <- paste("
+# Build SQL with person IDs directly in the query
+person_ids_str <- paste(cohort_person_ids, collapse = ", ")
+
+person_sql <- paste0("
   SELECT
     person_id,
     year_of_birth,
@@ -51,20 +68,44 @@ person_sql <- paste("
   FROM
     `person`
   WHERE
-    person_id IN UNNEST(@person_ids)
+    person_id IN (", person_ids_str, ")
 ")
 
 cat("Querying person table...\n")
-person_query <- bq_dataset_query(
-  Sys.getenv("WORKSPACE_CDR"),
-  person_sql,
-  billing = Sys.getenv("GOOGLE_PROJECT"),
-  parameters = list(bq_param_array(cohort_person_ids, "INT64"))
-)
 
-person <- bq_table_download(person_query)
+person_path <- file.path(Sys.getenv("WORKSPACE_BUCKET"), "bq_exports", Sys.getenv("OWNER_EMAIL"),
+                         strftime(lubridate::now(), "%Y%m%d"), "person_demographics", "person_demographics_*.csv")
+
+bq_table_save(bq_dataset_query(Sys.getenv("WORKSPACE_CDR"), person_sql, billing = Sys.getenv("GOOGLE_PROJECT")),
+              person_path, destination_format = "CSV")
+
+person <- read_bq_export_from_workspace_bucket(person_path)
 
 cat(sprintf("Retrieved demographics for %d patients\n", nrow(person)))
+
+# Add age and process demographics
+person <- person %>%
+  mutate(
+    age = lubridate::year(Sys.Date()) - year_of_birth,
+    sex = case_when(
+      sex_at_birth_concept_id == 45878463 ~ "Female",
+      sex_at_birth_concept_id == 45880669 ~ "Male",
+      TRUE ~ "Other/Unknown"
+    ),
+    race = case_when(
+      race_concept_id == 8527 ~ "White",
+      race_concept_id == 8516 ~ "Black or African American",
+      race_concept_id == 8515 ~ "Asian",
+      race_concept_id == 8657 ~ "American Indian or Alaska Native",
+      race_concept_id == 8557 ~ "Native Hawaiian or Other Pacific Islander",
+      TRUE ~ "Other/Unknown"
+    ),
+    ethnicity = case_when(
+      ethnicity_concept_id == 38003563 ~ "Hispanic or Latino",
+      ethnicity_concept_id == 38003564 ~ "Not Hispanic or Latino",
+      TRUE ~ "Unknown"
+    )
+  )
 
 # =============================================================================
 # PART 2: PULL DIAGNOSIS DATA
@@ -77,12 +118,12 @@ cat("========================================\n\n")
 # Define SNOMED codes for conditions of interest
 diagnosis_codes <- tribble(
   ~condition, ~concept_ids,
-  "hypertension", c(320128, 201826),  # Essential hypertension, Hypertensive disorder
-  "diabetes", c(201826, 443238),  # Type 2 diabetes, Diabetes mellitus
-  "dyslipidemia", c(432867, 432571),  # Hyperlipidemia, Hypercholesterolemia
-  "ihd", c(314666, 321318),  # Ischemic heart disease, Coronary artery disease
-  "stroke", c(381591, 372924),  # Cerebrovascular accident, Cerebral infarction
-  "osteoarthritis", c(80180, 80004)  # Osteoarthritis, Osteoarthritis of knee
+  "hypertension", c(320128, 201826),
+  "diabetes", c(201826, 443238),
+  "dyslipidemia", c(432867, 432571),
+  "ihd", c(314666, 321318),
+  "stroke", c(381591, 372924),
+  "osteoarthritis", c(80180, 80004)
 )
 
 cat("Querying condition_occurrence table for:\n")
@@ -93,7 +134,11 @@ cat("  - Ischemic heart disease\n")
 cat("  - Stroke/CVA\n")
 cat("  - Osteoarthritis\n\n")
 
-conditions_sql <- paste("
+# Build condition concept IDs list
+all_condition_codes <- unlist(diagnosis_codes$concept_ids)
+condition_ids_str <- paste(all_condition_codes, collapse = ", ")
+
+conditions_sql <- paste0("
   SELECT
     co.person_id,
     co.condition_concept_id,
@@ -104,45 +149,20 @@ conditions_sql <- paste("
   JOIN
     `concept` c ON co.condition_concept_id = c.concept_id
   WHERE
-    co.person_id IN UNNEST(@person_ids)
+    co.person_id IN (", person_ids_str, ")
     AND (
-      -- Hypertension
-      co.condition_concept_id IN UNNEST(@htn_codes)
-      OR co.condition_source_concept_id IN UNNEST(@htn_codes)
-      -- Diabetes
-      OR co.condition_concept_id IN UNNEST(@dm_codes)
-      OR co.condition_source_concept_id IN UNNEST(@dm_codes)
-      -- Dyslipidemia
-      OR co.condition_concept_id IN UNNEST(@dyslip_codes)
-      OR co.condition_source_concept_id IN UNNEST(@dyslip_codes)
-      -- IHD
-      OR co.condition_concept_id IN UNNEST(@ihd_codes)
-      OR co.condition_source_concept_id IN UNNEST(@ihd_codes)
-      -- Stroke
-      OR co.condition_concept_id IN UNNEST(@stroke_codes)
-      OR co.condition_source_concept_id IN UNNEST(@stroke_codes)
-      -- Osteoarthritis
-      OR co.condition_concept_id IN UNNEST(@oa_codes)
-      OR co.condition_source_concept_id IN UNNEST(@oa_codes)
+      co.condition_concept_id IN (", condition_ids_str, ")
+      OR co.condition_source_concept_id IN (", condition_ids_str, ")
     )
 ")
 
-conditions_query <- bq_dataset_query(
-  Sys.getenv("WORKSPACE_CDR"),
-  conditions_sql,
-  billing = Sys.getenv("GOOGLE_PROJECT"),
-  parameters = list(
-    bq_param_array(cohort_person_ids, "INT64"),
-    bq_param_array(diagnosis_codes$concept_ids[[1]], "INT64"),
-    bq_param_array(diagnosis_codes$concept_ids[[2]], "INT64"),
-    bq_param_array(diagnosis_codes$concept_ids[[3]], "INT64"),
-    bq_param_array(diagnosis_codes$concept_ids[[4]], "INT64"),
-    bq_param_array(diagnosis_codes$concept_ids[[5]], "INT64"),
-    bq_param_array(diagnosis_codes$concept_ids[[6]], "INT64")
-  )
-)
+conditions_path <- file.path(Sys.getenv("WORKSPACE_BUCKET"), "bq_exports", Sys.getenv("OWNER_EMAIL"),
+                              strftime(lubridate::now(), "%Y%m%d"), "conditions_diagnoses", "conditions_diagnoses_*.csv")
 
-conditions <- bq_table_download(conditions_query)
+bq_table_save(bq_dataset_query(Sys.getenv("WORKSPACE_CDR"), conditions_sql, billing = Sys.getenv("GOOGLE_PROJECT")),
+              conditions_path, destination_format = "CSV")
+
+conditions <- read_bq_export_from_workspace_bucket(conditions_path)
 
 cat(sprintf("Retrieved %d condition records\n", nrow(conditions)))
 
