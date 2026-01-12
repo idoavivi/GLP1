@@ -7,6 +7,8 @@
 # =============================================================================
 
 library(tidyverse)
+library(lme4)
+library(lmerTest)
 library(knitr)
 library(kableExtra)
 
@@ -19,41 +21,41 @@ cat("##################################################\n\n")
 # Load the data if needed, or continue from primary_analysis.R
 
 # =============================================================================
-# CALCULATE P-VALUES FOR EACH PERIOD VS BASELINE
+# CALCULATE P-VALUES FOR EACH PERIOD VS BASELINE USING MIXED EFFECTS MODELS
 # =============================================================================
 
-cat("Calculating p-values for each period vs baseline...\n")
+cat("Calculating p-values for each period vs baseline using mixed effects models...\n")
 
-# Function to calculate paired t-test p-value for each period vs baseline
-calculate_period_pvalues <- function(data, outcome_var) {
+# Function to calculate p-values from mixed effects model
+# Period is treated as categorical with Baseline as reference
+calculate_period_pvalues_lmer <- function(data, outcome_var) {
 
-  # Get baseline values for each person
-  baseline_data <- data %>%
-    filter(period == "Baseline") %>%
-    select(person_id, baseline_value = all_of(outcome_var))
+  # Ensure period is a factor with Baseline as reference
+  data <- data %>%
+    mutate(period = factor(period, levels = c("Baseline", "1-30 days", "31-90 days",
+                                               "91-180 days", "181-365 days", "Nadir (>12 weeks)")))
 
-  # Calculate p-value for each follow-up period
-  periods <- c("1-30 days", "31-90 days", "91-180 days", "181-365 days", "Nadir (>12 weeks)")
+  # Fit mixed effects model with period as categorical predictor
+  formula_str <- paste0(outcome_var, " ~ period + (1 | person_id)")
+  model <- lmer(as.formula(formula_str), data = data)
 
-  pvalues <- tibble(period = periods, p_value = NA_real_)
+  # Extract p-values from model summary
+  coef_summary <- summary(model)$coefficients
 
-  for (i in 1:length(periods)) {
-    period_data <- data %>%
-      filter(period == periods[i]) %>%
-      select(person_id, followup_value = all_of(outcome_var)) %>%
-      inner_join(baseline_data, by = "person_id")
+  # Get p-values for each period comparison to baseline
+  # Rows 2-6 are the period coefficients (baseline is reference, so not included)
+  period_names <- c("1-30 days", "31-90 days", "91-180 days", "181-365 days", "Nadir (>12 weeks)")
 
-    if (nrow(period_data) > 0) {
-      test_result <- t.test(period_data$followup_value, period_data$baseline_value, paired = TRUE)
-      pvalues$p_value[i] <- test_result$p.value
-    }
-  }
+  pvalues <- tibble(
+    period = period_names,
+    p_value = coef_summary[2:6, "Pr(>|t|)"]
+  )
 
   return(pvalues)
 }
 
 # Weight p-values
-weight_pvalues <- calculate_period_pvalues(
+weight_pvalues <- calculate_period_pvalues_lmer(
   weight_cleaned %>%
     inner_join(period_assignments, by = "person_id"),
   "weight_kg"
@@ -63,10 +65,10 @@ weight_pvalues <- calculate_period_pvalues(
 activity_data_for_pvalues <- activity_cleaned %>%
   inner_join(period_assignments, by = "person_id")
 
-steps_pvalues <- calculate_period_pvalues(activity_data_for_pvalues, "steps")
-mvpa_pvalues <- calculate_period_pvalues(activity_data_for_pvalues, "mvpa")
-sedentary_pvalues <- calculate_period_pvalues(activity_data_for_pvalues, "sedentary_minutes")
-calories_pvalues <- calculate_period_pvalues(activity_data_for_pvalues, "activity_calories")
+steps_pvalues <- calculate_period_pvalues_lmer(activity_data_for_pvalues, "steps")
+mvpa_pvalues <- calculate_period_pvalues_lmer(activity_data_for_pvalues, "mvpa")
+sedentary_pvalues <- calculate_period_pvalues_lmer(activity_data_for_pvalues, "sedentary_minutes")
+calories_pvalues <- calculate_period_pvalues_lmer(activity_data_for_pvalues, "activity_calories")
 
 # =============================================================================
 # WEIGHT TABLE - WIDE FORMAT
@@ -221,7 +223,7 @@ table2_html <- table2_wide %>%
                 full_width = FALSE, font_size = 12) %>%
   add_header_above(c(" " = 1, "Time Period" = 6)) %>%
   column_spec(1, bold = TRUE, width = "3cm") %>%
-  footnote(general = "Values shown as N (Mean ± SD). P-values from paired t-tests comparing each follow-up period to baseline.",
+  footnote(general = "Values shown as N (Mean ± SD). P-values from linear mixed effects models with random intercepts comparing each follow-up period to baseline.",
            general_title = "Note:",
            footnote_as_chunk = TRUE)
 
@@ -235,5 +237,5 @@ cat("##################################################\n\n")
 cat("Wide format table includes:\n")
 cat("  - Periods as columns\n")
 cat("  - Each period shows: N (Mean ± SD)\n")
-cat("  - P-value row for each parameter (paired t-test vs baseline)\n")
+cat("  - P-value row for each parameter (mixed effects model vs baseline)\n")
 cat("  - Publication-ready formatting\n\n")
