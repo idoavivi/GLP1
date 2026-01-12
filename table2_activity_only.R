@@ -25,6 +25,11 @@ cat("##################################################\n\n")
 cat("Loading cleaned data...\n")
 load("glp1_cleaned_data.RData")
 
+# Check initial patient counts
+cat(sprintf("Initial activity_cleaned patients: %d\n", length(unique(activity_cleaned$person_id))))
+cat(sprintf("Initial bmi_data patients: %d\n", length(unique(bmi_data$person_id))))
+cat("\n")
+
 # =============================================================================
 # STEP 1: DEFINE FIXED BASELINE COHORT - EXACT TABLE 1 LOGIC
 # =============================================================================
@@ -46,6 +51,7 @@ patients_to_exclude_bmi <- baseline_bmi_check %>%
 cat(sprintf("Patients with BMI < 30 excluded: %d\n", length(patients_to_exclude_bmi)))
 
 activity_cleaned <- activity_cleaned %>% filter(!person_id %in% patients_to_exclude_bmi)
+cat(sprintf("Remaining patients after BMI filter: %d\n", length(unique(activity_cleaned$person_id))))
 
 # EXACT REPLICATION OF primary_analysis.R lines 69-96
 
