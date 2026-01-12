@@ -2,7 +2,8 @@
 # CREATE PUBLICATION-READY TABLE 2 (WIDE FORMAT)
 # =============================================================================
 # Reformats Table 2 with periods as columns and metrics as rows
-# Each period shows: N, Mean ± SD, p-value
+# Each period shows: N, Mean ± SD
+# P-values compare each period to baseline
 # =============================================================================
 
 library(tidyverse)
@@ -18,6 +19,56 @@ cat("##################################################\n\n")
 # Load the data if needed, or continue from primary_analysis.R
 
 # =============================================================================
+# CALCULATE P-VALUES FOR EACH PERIOD VS BASELINE
+# =============================================================================
+
+cat("Calculating p-values for each period vs baseline...\n")
+
+# Function to calculate paired t-test p-value for each period vs baseline
+calculate_period_pvalues <- function(data, outcome_var) {
+
+  # Get baseline values for each person
+  baseline_data <- data %>%
+    filter(period == "Baseline") %>%
+    select(person_id, baseline_value = all_of(outcome_var))
+
+  # Calculate p-value for each follow-up period
+  periods <- c("1-30 days", "31-90 days", "91-180 days", "181-365 days", "Nadir (>12 weeks)")
+
+  pvalues <- tibble(period = periods, p_value = NA_real_)
+
+  for (i in 1:length(periods)) {
+    period_data <- data %>%
+      filter(period == periods[i]) %>%
+      select(person_id, followup_value = all_of(outcome_var)) %>%
+      inner_join(baseline_data, by = "person_id")
+
+    if (nrow(period_data) > 0) {
+      test_result <- t.test(period_data$followup_value, period_data$baseline_value, paired = TRUE)
+      pvalues$p_value[i] <- test_result$p.value
+    }
+  }
+
+  return(pvalues)
+}
+
+# Weight p-values
+weight_pvalues <- calculate_period_pvalues(
+  weight_cleaned %>%
+    inner_join(period_assignments, by = "person_id"),
+  "weight_kg"
+)
+
+# Activity p-values
+activity_data_for_pvalues <- activity_cleaned %>%
+  inner_join(period_assignments, by = "person_id")
+
+steps_pvalues <- calculate_period_pvalues(activity_data_for_pvalues, "steps")
+mvpa_pvalues <- calculate_period_pvalues(activity_data_for_pvalues, "mvpa")
+sedentary_pvalues <- calculate_period_pvalues(activity_data_for_pvalues, "sedentary_minutes")
+calories_pvalues <- calculate_period_pvalues(activity_data_for_pvalues, "activity_calories")
+
+# =============================================================================
 # WEIGHT TABLE - WIDE FORMAT
 # =============================================================================
 
@@ -29,13 +80,23 @@ weight_table_wide <- weight_summary %>%
   ) %>%
   select(period, value) %>%
   pivot_wider(names_from = period, values_from = value) %>%
-  mutate(
-    Parameter = "Weight (kg)",
-    `P-value` = sprintf("%.4f", p_value_weight)
-  ) %>%
-  select(Parameter, everything(), `P-value`)
+  mutate(Parameter = "Weight (kg)") %>%
+  select(Parameter, everything())
 
-print(weight_table_wide)
+# Add p-value row for weight
+weight_pvalue_row <- tibble(
+  Parameter = "  P-value",
+  Baseline = "—",
+  `1-30 days` = sprintf("%.4f", weight_pvalues$p_value[1]),
+  `31-90 days` = sprintf("%.4f", weight_pvalues$p_value[2]),
+  `91-180 days` = sprintf("%.4f", weight_pvalues$p_value[3]),
+  `181-365 days` = sprintf("%.4f", weight_pvalues$p_value[4]),
+  `Nadir (>12 weeks)` = sprintf("%.4f", weight_pvalues$p_value[5])
+)
+
+weight_table_with_p <- bind_rows(weight_table_wide, weight_pvalue_row)
+
+print(weight_table_with_p)
 
 # =============================================================================
 # ACTIVITY TABLE - WIDE FORMAT
@@ -72,42 +133,77 @@ activity_long_for_wide <- activity_summary %>%
   ) %>%
   select(Parameter, period, value)
 
-# Create wide format
+# Create wide format for each metric
 steps_wide <- activity_long_for_wide %>%
   filter(Parameter == "Steps per day") %>%
-  pivot_wider(names_from = period, values_from = value) %>%
-  mutate(`P-value` = sprintf("%.4f", p_value_steps))
+  pivot_wider(names_from = period, values_from = value)
+
+steps_pvalue_row <- tibble(
+  Parameter = "  P-value",
+  Baseline = "—",
+  `1-30 days` = sprintf("%.4f", steps_pvalues$p_value[1]),
+  `31-90 days` = sprintf("%.4f", steps_pvalues$p_value[2]),
+  `91-180 days` = sprintf("%.4f", steps_pvalues$p_value[3]),
+  `181-365 days` = sprintf("%.4f", steps_pvalues$p_value[4]),
+  `Nadir (>12 weeks)` = sprintf("%.4f", steps_pvalues$p_value[5])
+)
 
 mvpa_wide <- activity_long_for_wide %>%
   filter(Parameter == "MVPA (min/day)") %>%
-  pivot_wider(names_from = period, values_from = value) %>%
-  mutate(`P-value` = sprintf("%.4f", p_value_mvpa))
+  pivot_wider(names_from = period, values_from = value)
+
+mvpa_pvalue_row <- tibble(
+  Parameter = "  P-value",
+  Baseline = "—",
+  `1-30 days` = sprintf("%.4f", mvpa_pvalues$p_value[1]),
+  `31-90 days` = sprintf("%.4f", mvpa_pvalues$p_value[2]),
+  `91-180 days` = sprintf("%.4f", mvpa_pvalues$p_value[3]),
+  `181-365 days` = sprintf("%.4f", mvpa_pvalues$p_value[4]),
+  `Nadir (>12 weeks)` = sprintf("%.4f", mvpa_pvalues$p_value[5])
+)
 
 sedentary_wide <- activity_long_for_wide %>%
   filter(Parameter == "Sedentary (min/day)") %>%
-  pivot_wider(names_from = period, values_from = value) %>%
-  mutate(`P-value` = "—")
+  pivot_wider(names_from = period, values_from = value)
+
+sedentary_pvalue_row <- tibble(
+  Parameter = "  P-value",
+  Baseline = "—",
+  `1-30 days` = sprintf("%.4f", sedentary_pvalues$p_value[1]),
+  `31-90 days` = sprintf("%.4f", sedentary_pvalues$p_value[2]),
+  `91-180 days` = sprintf("%.4f", sedentary_pvalues$p_value[3]),
+  `181-365 days` = sprintf("%.4f", sedentary_pvalues$p_value[4]),
+  `Nadir (>12 weeks)` = sprintf("%.4f", sedentary_pvalues$p_value[5])
+)
 
 calories_wide <- activity_long_for_wide %>%
   filter(Parameter == "Activity Calories (kcal/day)") %>%
-  pivot_wider(names_from = period, values_from = value) %>%
-  mutate(`P-value` = sprintf("%.4f", p_value_calories))
+  pivot_wider(names_from = period, values_from = value)
 
-# Combine all metrics
-activity_table_wide <- bind_rows(
-  steps_wide,
-  mvpa_wide,
-  sedentary_wide,
-  calories_wide
+calories_pvalue_row <- tibble(
+  Parameter = "  P-value",
+  Baseline = "—",
+  `1-30 days` = sprintf("%.4f", calories_pvalues$p_value[1]),
+  `31-90 days` = sprintf("%.4f", calories_pvalues$p_value[2]),
+  `91-180 days` = sprintf("%.4f", calories_pvalues$p_value[3]),
+  `181-365 days` = sprintf("%.4f", calories_pvalues$p_value[4]),
+  `Nadir (>12 weeks)` = sprintf("%.4f", calories_pvalues$p_value[5])
 )
 
-# Combine weight and activity
+# Combine weight and activity with p-value rows
 table2_wide <- bind_rows(
-  weight_table_wide,
-  activity_table_wide
+  weight_table_with_p,
+  steps_wide,
+  steps_pvalue_row,
+  mvpa_wide,
+  mvpa_pvalue_row,
+  sedentary_wide,
+  sedentary_pvalue_row,
+  calories_wide,
+  calories_pvalue_row
 ) %>%
   select(Parameter, Baseline, `1-30 days`, `31-90 days`, `91-180 days`,
-         `181-365 days`, `Nadir (>12 weeks)`, `P-value`)
+         `181-365 days`, `Nadir (>12 weeks)`)
 
 print(table2_wide)
 
@@ -120,13 +216,12 @@ cat("\nSaved: table2_longitudinal_outcomes_wide.csv\n")
 
 # Create publication-quality HTML table
 table2_html <- table2_wide %>%
-  kable(format = "html", escape = FALSE, align = c("l", rep("c", 6), "c")) %>%
+  kable(format = "html", escape = FALSE, align = c("l", rep("c", 6))) %>%
   kable_styling(bootstrap_options = c("striped", "hover", "condensed"),
                 full_width = FALSE, font_size = 12) %>%
-  add_header_above(c(" " = 1, "Time Period" = 6, " " = 1)) %>%
+  add_header_above(c(" " = 1, "Time Period" = 6)) %>%
   column_spec(1, bold = TRUE, width = "3cm") %>%
-  column_spec(8, bold = TRUE, width = "1.5cm") %>%
-  footnote(general = "Values shown as N (Mean ± SD). P-values from linear mixed effects models testing for trend over time.",
+  footnote(general = "Values shown as N (Mean ± SD). P-values from paired t-tests comparing each follow-up period to baseline.",
            general_title = "Note:",
            footnote_as_chunk = TRUE)
 
@@ -140,5 +235,5 @@ cat("##################################################\n\n")
 cat("Wide format table includes:\n")
 cat("  - Periods as columns\n")
 cat("  - Each period shows: N (Mean ± SD)\n")
-cat("  - P-value column from mixed effects models\n")
+cat("  - P-value row for each parameter (paired t-test vs baseline)\n")
 cat("  - Publication-ready formatting\n\n")
