@@ -92,11 +92,23 @@ followup_activity_patients <- activity_cleaned %>%
 
 cat(sprintf("Patients with ≥1 follow-up period with ≥3 valid days: %d\n", nrow(followup_activity_patients)))
 
-# FIXED BASELINE COHORT = baseline activity AND at least one follow-up
+# Get patients with baseline weight
+baseline_weight_patients <- weight_cleaned %>%
+  filter(days_from_initiation >= -180, days_from_initiation <= 0) %>%
+  group_by(person_id) %>%
+  summarize(has_baseline_weight = n() > 0, .groups = "drop") %>%
+  filter(has_baseline_weight) %>%
+  select(person_id)
+
+cat(sprintf("Patients with baseline weight: %d\n", nrow(baseline_weight_patients)))
+
+# FIXED BASELINE COHORT = baseline activity AND baseline weight AND at least one follow-up
 baseline_cohort_fixed <- baseline_activity_patients %>%
+  inner_join(baseline_weight_patients, by = "person_id") %>%
   inner_join(followup_activity_patients, by = "person_id")
 
-cat(sprintf("\n*** FIXED BASELINE COHORT: N = %d ***\n\n", nrow(baseline_cohort_fixed)))
+cat(sprintf("\n*** FIXED BASELINE COHORT: N = %d ***\n", nrow(baseline_cohort_fixed)))
+cat("(Patients with baseline activity AND baseline weight AND ≥1 follow-up)\n\n")
 
 # Filter all data to baseline cohort
 activity_cleaned <- activity_cleaned %>%
@@ -336,7 +348,25 @@ activity_summary <- activity_long %>%
 
 cat("Weight summary:\n")
 print(weight_summary)
-cat("\nActivity summary:\n")
+
+# Validate: Weight should DECREASE over time on GLP-1
+baseline_weight_mean <- weight_summary %>% filter(period == "Baseline") %>% pull(mean_weight)
+nadir_weight_mean <- weight_summary %>% filter(period == "Nadir (>12 weeks)") %>% pull(mean_weight)
+weight_change <- nadir_weight_mean - baseline_weight_mean
+
+cat(sprintf("\nWeight change validation:\n"))
+cat(sprintf("  Baseline: %.1f kg\n", baseline_weight_mean))
+cat(sprintf("  Nadir: %.1f kg\n", nadir_weight_mean))
+cat(sprintf("  Change: %.1f kg (%.1f%%)\n", weight_change, 100*weight_change/baseline_weight_mean))
+
+if(weight_change > 0) {
+  cat("\n*** WARNING: Weight INCREASED on GLP-1 - this is unexpected! ***\n")
+  cat("*** Check data quality or funnel logic ***\n\n")
+} else {
+  cat("  ✓ Weight decreased as expected\n\n")
+}
+
+cat("Activity summary:\n")
 print(activity_summary)
 cat("\n")
 
