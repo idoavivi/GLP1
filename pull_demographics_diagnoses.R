@@ -55,13 +55,14 @@ person_sql <- paste("
 ")
 
 cat("Querying person table...\n")
-person <- bq_project_query(
-  Sys.getenv("GOOGLE_PROJECT"),
+person_query <- bq_dataset_query(
+  Sys.getenv("WORKSPACE_CDR"),
   person_sql,
+  billing = Sys.getenv("GOOGLE_PROJECT"),
   parameters = list(bq_param_array(cohort_person_ids, "INT64"))
 )
 
-person <- bq_table_download(person)
+person <- bq_table_download(person_query)
 
 cat(sprintf("Retrieved demographics for %d patients\n", nrow(person)))
 
@@ -126,9 +127,10 @@ conditions_sql <- paste("
     )
 ")
 
-conditions <- bq_project_query(
-  Sys.getenv("GOOGLE_PROJECT"),
+conditions_query <- bq_dataset_query(
+  Sys.getenv("WORKSPACE_CDR"),
   conditions_sql,
+  billing = Sys.getenv("GOOGLE_PROJECT"),
   parameters = list(
     bq_param_array(cohort_person_ids, "INT64"),
     bq_param_array(diagnosis_codes$concept_ids[[1]], "INT64"),
@@ -140,7 +142,7 @@ conditions <- bq_project_query(
   )
 )
 
-conditions <- bq_table_download(conditions)
+conditions <- bq_table_download(conditions_query)
 
 cat(sprintf("Retrieved %d condition records\n", nrow(conditions)))
 
