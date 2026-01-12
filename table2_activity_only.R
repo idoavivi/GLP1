@@ -38,20 +38,32 @@ cat("\n========================================\n")
 cat("STEP 1: Defining Fixed Baseline Cohort\n")
 cat("========================================\n\n")
 
-# Filter to BMI >= 30 (already done in primary_analysis.R)
-baseline_bmi_check <- bmi_data %>%
-  filter(days_from_initiation >= -180, days_from_initiation <= 0) %>%
-  group_by(person_id) %>%
-  summarize(baseline_bmi = mean(bmi, na.rm = TRUE), .groups = "drop")
+# Inclusion: BMI ≥30 OR obesity diagnosis
+# Use obesity_cohort if available (already has both criteria)
+if(exists("obesity_cohort") && is.data.frame(obesity_cohort)) {
+  cat("Using obesity_cohort (BMI ≥30 OR obesity diagnosis)\n")
+  eligible_patients <- obesity_cohort$person_id
+  cat(sprintf("Eligible patients: %d\n", length(eligible_patients)))
+} else {
+  cat("obesity_cohort not found, using BMI ≥30 only\n")
+  baseline_bmi_check <- bmi_data %>%
+    filter(days_from_initiation >= -180, days_from_initiation <= 0) %>%
+    group_by(person_id) %>%
+    summarize(baseline_bmi = mean(bmi, na.rm = TRUE), .groups = "drop")
 
-patients_to_exclude_bmi <- baseline_bmi_check %>%
-  filter(baseline_bmi < 30) %>%
-  pull(person_id)
+  patients_to_exclude_bmi <- baseline_bmi_check %>%
+    filter(baseline_bmi < 30) %>%
+    pull(person_id)
 
-cat(sprintf("Patients with BMI < 30 excluded: %d\n", length(patients_to_exclude_bmi)))
+  cat(sprintf("Patients with BMI < 30 excluded: %d\n", length(patients_to_exclude_bmi)))
 
-activity_cleaned <- activity_cleaned %>% filter(!person_id %in% patients_to_exclude_bmi)
-cat(sprintf("Remaining patients after BMI filter: %d\n", length(unique(activity_cleaned$person_id))))
+  activity_cleaned <- activity_cleaned %>% filter(!person_id %in% patients_to_exclude_bmi)
+  eligible_patients <- unique(activity_cleaned$person_id)
+}
+
+# Filter to eligible patients
+activity_cleaned <- activity_cleaned %>% filter(person_id %in% eligible_patients)
+cat(sprintf("Activity data after inclusion filter: %d patients\n", length(unique(activity_cleaned$person_id))))
 
 # EXACT REPLICATION OF primary_analysis.R lines 69-96
 
