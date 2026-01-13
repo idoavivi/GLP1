@@ -28,24 +28,40 @@ read_bq_export_from_workspace_bucket <- function(export_path, col_types = NULL) 
         }))
 }
 
-# Load existing cohort to get patient IDs
-cat("Loading existing cohort...\n")
-load("glp1_cleaned_data.RData")
+# =============================================================================
+# IMPORTANT: This script should be run AFTER comprehensive_data_cleaning.R
+# in the SAME R session, so that objects are already in memory.
+# Do NOT load from glp1_cleaned_data.RData - that would overwrite fresh data!
+# =============================================================================
 
-# Get person IDs from whichever object exists
-if (exists("obesity_cohort") && is.data.frame(obesity_cohort)) {
-  cohort_person_ids <- unique(obesity_cohort$person_id)
-} else if (exists("glp1_initiation") && is.data.frame(glp1_initiation)) {
-  cohort_person_ids <- unique(glp1_initiation$person_id)
-} else if (exists("weight_cleaned") && is.data.frame(weight_cleaned)) {
-  cohort_person_ids <- unique(weight_cleaned$person_id)
-} else if (exists("activity_cleaned") && is.data.frame(activity_cleaned)) {
-  cohort_person_ids <- unique(activity_cleaned$person_id)
-} else {
-  stop("Could not find cohort data in RData file")
+cat("Checking for cohort data in memory...\n")
+
+# Check if objects exist in memory (from comprehensive_data_cleaning.R)
+if (!exists("obesity_cohort") || !is.data.frame(obesity_cohort)) {
+  stop(paste(
+    "\nERROR: obesity_cohort not found in memory!\n",
+    "This script must be run AFTER comprehensive_data_cleaning.R\n",
+    "in the SAME R session. Do NOT load from file.\n\n",
+    "Steps:\n",
+    "  1. Run: source('comprehensive_data_cleaning.R')\n",
+    "  2. Then run: source('pull_demographics_diagnoses.R')\n",
+    "  3. Do NOT restart R between these steps!\n"
+  ))
 }
 
-cat(sprintf("Cohort size: %d patients\n\n", length(cohort_person_ids)))
+# Verify we have the fresh data with correct cohort size
+expected_min_cohort_size <- 300  # Should be ~304 from fresh comprehensive_data_cleaning.R
+
+if (nrow(obesity_cohort) < expected_min_cohort_size) {
+  warning(sprintf(
+    "\n⚠️  WARNING: Cohort size is %d (expected ~304)\n",
+    nrow(obesity_cohort),
+    "You may be using OLD data. Re-run comprehensive_data_cleaning.R first!\n"
+  ))
+}
+
+cohort_person_ids <- unique(obesity_cohort$person_id)
+cat(sprintf("✓ Cohort found in memory: %d patients\n\n", length(cohort_person_ids)))
 
 # =============================================================================
 # PART 1: PULL PERSON DEMOGRAPHICS
@@ -259,45 +275,42 @@ cat("========================================\n")
 cat("PART 4: Saving Data\n")
 cat("========================================\n\n")
 
-# Update obesity_cohort if it exists
-if(exists("obesity_cohort") && is.data.frame(obesity_cohort)) {
-  # Remove old diagnosis columns if they exist
-  obesity_cohort <- obesity_cohort %>%
-    select(-any_of(c("has_hypertension", "has_diabetes", "has_dyslipidemia",
-                     "has_ihd", "has_stroke", "has_osteoarthritis"))) %>%
-    left_join(diagnoses, by = "person_id")
-} else {
-  obesity_cohort <- diagnoses
+# Update obesity_cohort with diagnoses (remove old columns first)
+obesity_cohort <- obesity_cohort %>%
+  select(-any_of(c("has_hypertension", "has_diabetes", "has_dyslipidemia",
+                   "has_ihd", "has_stroke", "has_osteoarthritis"))) %>%
+  left_join(diagnoses, by = "person_id")
+
+cat(sprintf("Updated obesity_cohort: %d patients with diagnoses\n\n", nrow(obesity_cohort)))
+
+# Verify cohort size hasn't changed
+if (nrow(obesity_cohort) != length(cohort_person_ids)) {
+  warning(sprintf(
+    "⚠️  Cohort size changed after adding diagnoses! (%d → %d)\n",
+    length(cohort_person_ids),
+    nrow(obesity_cohort)
+  ))
 }
 
-# Build list of objects to save
-objects_to_save <- c("obesity_cohort", "person")
+# Build list of objects to save - use same objects as comprehensive_data_cleaning.R
+# CRITICAL: Save using the SAME object names that comprehensive_data_cleaning.R uses!
 
-# Add other objects if they exist
-if (exists("drug_glp1_clean") && is.data.frame(drug_glp1_clean)) {
-  objects_to_save <- c(objects_to_save, "drug_glp1_clean")
-}
-if (exists("glp1_initiation") && is.data.frame(glp1_initiation)) {
-  objects_to_save <- c(objects_to_save, "glp1_initiation")
-}
-if (exists("weight_cleaned") && is.data.frame(weight_cleaned)) {
-  objects_to_save <- c(objects_to_save, "weight_cleaned")
-}
-if (exists("activity_cleaned") && is.data.frame(activity_cleaned)) {
-  objects_to_save <- c(objects_to_save, "activity_cleaned")
-}
-if (exists("bmi_data") && is.data.frame(bmi_data)) {
-  objects_to_save <- c(objects_to_save, "bmi_data")
-}
-if (exists("period_assignments") && is.data.frame(period_assignments)) {
-  objects_to_save <- c(objects_to_save, "period_assignments")
-}
+objects_to_save <- list(
+  drug_glp1_clean = drug_glp1_clean,
+  glp1_initiation = glp1_initiation,
+  weight_cleaned = weight_cleaned,
+  activity_cleaned = activity_cleaned,
+  bmi_data = bmi_data,
+  obesity_cohort = obesity_cohort,
+  person = person  # NEW: demographics data
+)
 
 # Save updated RData
-save(list = objects_to_save, file = "glp1_cleaned_data.RData")
+save(list = names(objects_to_save), file = "glp1_cleaned_data.RData")
 
 cat("Saved updated: glp1_cleaned_data.RData\n")
 cat(sprintf("  - Saved %d objects\n", length(objects_to_save)))
+cat(sprintf("  - Cohort size: %d patients\n", nrow(obesity_cohort)))
 cat("  - Added person demographics (age, sex, race, ethnicity)\n")
 cat("  - Added diagnoses (HTN, DM, dyslipidemia, IHD, CVA, OA)\n\n")
 
@@ -307,4 +320,10 @@ cat("##################################################\n\n")
 
 cat("Next steps:\n")
 cat("  1. Download glp1_cleaned_data.RData from workspace\n")
-cat("  2. Re-run primary_analysis.R to generate updated Table 1\n\n")
+cat("  2. Run table1_baseline_characteristics.R to generate Table 1 with demographics\n")
+cat("  3. Run test_normality.R and table2_activity_adaptive.R for Table 2\n\n")
+
+cat("IMPORTANT: If you need to re-run this script:\n")
+cat("  - First run comprehensive_data_cleaning.R\n")
+cat("  - Then immediately run this script (same R session)\n")
+cat("  - Do NOT load glp1_cleaned_data.RData manually!\n\n")
