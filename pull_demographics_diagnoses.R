@@ -293,24 +293,65 @@ if (nrow(obesity_cohort) != length(cohort_person_ids)) {
 }
 
 # Build list of objects to save - use same objects as comprehensive_data_cleaning.R
-# CRITICAL: Save using the SAME object names that comprehensive_data_cleaning.R uses!
+# CRITICAL: comprehensive_data_cleaning.R creates objects with _final suffix in memory
+# but saves them with different names. We need to map correctly.
 
-objects_to_save <- list(
-  drug_glp1_clean = drug_glp1_clean,
-  glp1_initiation = glp1_initiation,
-  weight_cleaned = weight_cleaned,
-  activity_cleaned = activity_cleaned,
-  bmi_data = bmi_data,
+# Check which object names exist (comprehensive_data_cleaning.R uses _final suffix)
+if (exists("drug_final")) {
+  drug_obj <- drug_final
+} else if (exists("drug_glp1_clean")) {
+  drug_obj <- drug_glp1_clean
+} else {
+  stop("Cannot find drug data object")
+}
+
+if (exists("glp1_initiation_final")) {
+  init_obj <- glp1_initiation_final
+} else if (exists("glp1_initiation")) {
+  init_obj <- glp1_initiation
+} else {
+  stop("Cannot find GLP-1 initiation object")
+}
+
+if (exists("weight_final")) {
+  weight_obj <- weight_final
+} else if (exists("weight_cleaned")) {
+  weight_obj <- weight_cleaned
+} else {
+  stop("Cannot find weight data object")
+}
+
+if (exists("activity_final")) {
+  activity_obj <- activity_final
+} else if (exists("activity_cleaned")) {
+  activity_obj <- activity_cleaned
+} else {
+  stop("Cannot find activity data object")
+}
+
+if (exists("bmi_final")) {
+  bmi_obj <- bmi_final
+} else if (exists("bmi_data")) {
+  bmi_obj <- bmi_data
+} else {
+  stop("Cannot find BMI data object")
+}
+
+# Save with the SAME parameter names that comprehensive_data_cleaning.R uses
+save(
+  drug_glp1_clean = drug_obj,
+  glp1_initiation = init_obj,
+  weight_cleaned = weight_obj,
+  activity_cleaned = activity_obj,
+  bmi_data = bmi_obj,
   obesity_cohort = obesity_cohort,
-  person = person  # NEW: demographics data
+  person = person,
+  file = "glp1_cleaned_data.RData"
 )
 
-# Save updated RData
-save(list = names(objects_to_save), file = "glp1_cleaned_data.RData")
-
 cat("Saved updated: glp1_cleaned_data.RData\n")
-cat(sprintf("  - Saved %d objects\n", length(objects_to_save)))
-cat(sprintf("  - Cohort size: %d patients\n", nrow(obesity_cohort)))
+cat("  - Saved 7 objects\n")
+cat(sprintf("  - Cohort size: %d patients (obesity_cohort from comprehensive_data_cleaning.R)\n", nrow(obesity_cohort)))
 cat("  - Added person demographics (age, sex, race, ethnicity)\n")
 cat("  - Added diagnoses (HTN, DM, dyslipidemia, IHD, CVA, OA)\n\n")
 
