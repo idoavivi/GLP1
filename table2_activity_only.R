@@ -23,7 +23,7 @@ cat("##################################################\n\n")
 
 # Load cleaned data
 cat("Loading cleaned data...\n")
-load("glp1_cleaned_data.RData")
+load("glp1_cleaned_data (2).RData")
 
 # Check initial patient counts
 cat(sprintf("Initial activity_cleaned patients: %d\n", length(unique(activity_cleaned$person_id))))

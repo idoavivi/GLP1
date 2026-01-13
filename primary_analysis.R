@@ -19,7 +19,7 @@ cat("##################################################\n\n")
 
 # Load cleaned data
 cat("Loading cleaned data...\n")
-load("glp1_cleaned_data.RData")
+load("glp1_cleaned_data (2).RData")
 
 # Prepare data - datasets already have days_from_initiation
 cat("Preparing datasets...\n")
