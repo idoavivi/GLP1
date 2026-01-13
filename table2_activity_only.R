@@ -25,6 +25,13 @@ cat("##################################################\n\n")
 cat("Loading cleaned data...\n")
 load("glp1_cleaned_data (2).RData")
 
+# Map to expected names
+activity_cleaned <- activity_final
+weight_cleaned <- weight_final
+bmi_data <- bmi_final
+drug_glp1_clean <- drug_final
+glp1_initiation <- glp1_initiation_final
+
 # Check initial patient counts
 cat(sprintf("Initial activity_cleaned patients: %d\n", length(unique(activity_cleaned$person_id))))
 cat(sprintf("Initial bmi_data patients: %d\n", length(unique(bmi_data$person_id))))

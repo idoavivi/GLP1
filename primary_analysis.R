@@ -21,6 +21,13 @@ cat("##################################################\n\n")
 cat("Loading cleaned data...\n")
 load("glp1_cleaned_data (2).RData")
 
+# Map to expected names (new RData uses _final suffix)
+activity_cleaned <- activity_final
+weight_cleaned <- weight_final
+bmi_data <- bmi_final
+drug_glp1_clean <- drug_final
+glp1_initiation <- glp1_initiation_final
+
 # Prepare data - datasets already have days_from_initiation
 cat("Preparing datasets...\n")
 
