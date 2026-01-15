@@ -17,11 +17,42 @@ cat("Adaptive statistics: mean±SD or median(IQR)\n")
 cat("##################################################\n\n")
 
 # =============================================================================
-# LOAD DATA AND CHECK FOR NORMALITY RECOMMENDATION
+# LOAD DATA (or use objects in memory if available)
 # =============================================================================
 
-cat("Loading cleaned data...\n")
-load("glp1_cleaned_data.RData")
+cat("Checking for data...\n")
+
+# Check if objects exist in memory (from comprehensive_data_cleaning.R)
+has_data_in_memory <- (exists("obesity_cohort") && is.data.frame(obesity_cohort) &&
+                       (exists("activity_cleaned") || exists("activity_final")) &&
+                       (exists("weight_cleaned") || exists("weight_final")) &&
+                       (exists("bmi_data") || exists("bmi_final")))
+
+if (has_data_in_memory) {
+  cat("✓ Using data from memory (from comprehensive_data_cleaning.R)\n")
+
+  # Handle object name mapping (comprehensive_data_cleaning.R uses _final suffix)
+  if (exists("activity_final")) {
+    activity_cleaned <- activity_final
+  }
+  if (exists("weight_final")) {
+    weight_cleaned <- weight_final
+  }
+  if (exists("bmi_final")) {
+    bmi_data <- bmi_final
+  }
+  if (exists("drug_final")) {
+    drug_glp1_clean <- drug_final
+  }
+  if (exists("glp1_initiation_final")) {
+    glp1_initiation <- glp1_initiation_final
+  }
+} else {
+  cat("Loading from file: glp1_cleaned_data.RData\n")
+  load("glp1_cleaned_data.RData")
+}
+
+cat(sprintf("  Obesity cohort: %d patients\n\n", nrow(obesity_cohort)))
 
 # Check if normality recommendation exists
 if (file.exists("normality_recommendation.csv")) {
@@ -42,13 +73,6 @@ if (use_median) {
   cat("\nUsing MEAN ± SD for all activity parameters\n")
   cat("(Data normally distributed)\n\n")
 }
-
-# Check for obesity_cohort
-if (!exists("obesity_cohort")) {
-  stop("Error: obesity_cohort not found in RData file")
-}
-
-cat(sprintf("Loaded: %d patients in obesity cohort\n\n", nrow(obesity_cohort)))
 
 # =============================================================================
 # STEP 1: DEFINE FIXED BASELINE COHORT - EXACT TABLE 1 LOGIC
