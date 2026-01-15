@@ -137,7 +137,8 @@ transitions_3p <- activity_categorized %>%
 cat(sprintf("Patients with complete 3-period trajectory: N=%d\n", nrow(transitions_3p)))
 
 # Check if we have enough patients for 3-period diagram
-if (nrow(transitions_3p) >= 10) {
+# Need at least 20 for meaningful visualization with 3 tertiles
+if (nrow(transitions_3p) >= 20) {
   # Use 3-period diagram
   transitions <- transitions_3p
   n_periods <- 3
@@ -176,8 +177,10 @@ cat("\n")
 write_csv(transition_counts, "sankey_activity_transitions_data.csv")
 
 # Create alluvial diagram using ggalluvial
-if (nrow(transitions) == 0) {
-  cat("⚠ No patients with activity transitions. Skipping diagram.\n\n")
+# Need at least 3 patients for meaningful alluvial diagram
+if (nrow(transitions) < 3) {
+  cat(sprintf("⚠ Insufficient patients for alluvial diagram (N=%d). Skipping diagram.\n", nrow(transitions)))
+  cat("   Activity transitions saved in CSV file.\n\n")
 } else {
   if (n_periods == 3) {
     alluvial_data <- to_lodes_form(transitions %>% select(Baseline, Period_1, Period_2),
