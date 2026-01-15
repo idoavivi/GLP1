@@ -9,9 +9,6 @@
 
 library(tidyverse)
 library(survival)
-library(survminer)
-library(mediation)
-library(patchwork)
 library(broom)
 
 cat("\n##################################################\n")
@@ -20,15 +17,18 @@ cat("##################################################\n\n")
 
 # Install packages if needed
 if (!require("mediation", quietly = TRUE)) {
-  cat("Installing mediation package...\n")
-  install.packages("mediation")
-  library(mediation)
+  cat("⚠ mediation package not available - mediation analysis will use basic linear models\n")
+  has_mediation <- FALSE
+} else {
+  has_mediation <- TRUE
 }
 
 if (!require("survminer", quietly = TRUE)) {
-  cat("Installing survminer package...\n")
-  install.packages("survminer")
+  cat("⚠ survminer package not available - will create basic Kaplan-Meier plot\n")
+  has_survminer <- FALSE
+} else {
   library(survminer)
+  has_survminer <- TRUE
 }
 
 # =============================================================================
@@ -359,26 +359,65 @@ print(surv_diff)
 cat("\n")
 
 # Create Kaplan-Meier plot
-p_km <- ggsurvplot(
-  surv_fit,
-  data = survival_data,
-  conf.int = TRUE,
-  pval = TRUE,
-  risk.table = TRUE,
-  risk.table.height = 0.25,
-  ggtheme = theme_minimal(base_size = 12),
-  palette = c("#D32F2F", "#FFA000", "#388E3C"),
-  title = "Time to Nadir Weight by Baseline Activity Level",
-  xlab = "Days from GLP-1 Initiation",
-  ylab = "Probability of NOT Reaching Nadir",
-  legend.title = "Baseline Activity",
-  legend.labs = c("Low", "Medium", "High")
-)
+if (has_survminer) {
+  # Use survminer for fancy plot with risk table
+  p_km <- ggsurvplot(
+    surv_fit,
+    data = survival_data,
+    conf.int = TRUE,
+    pval = TRUE,
+    risk.table = TRUE,
+    risk.table.height = 0.25,
+    ggtheme = theme_minimal(base_size = 12),
+    palette = c("#D32F2F", "#FFA000", "#388E3C"),
+    title = "Time to Nadir Weight by Baseline Activity Level",
+    xlab = "Days from GLP-1 Initiation",
+    ylab = "Probability of NOT Reaching Nadir",
+    legend.title = "Baseline Activity",
+    legend.labs = c("Low", "Medium", "High")
+  )
 
-# Save KM plot
-ggsave("kaplan_meier_nadir.png", print(p_km), width = 10, height = 10, dpi = 300)
-ggsave("kaplan_meier_nadir.pdf", print(p_km), width = 10, height = 10)
-cat("Saved: kaplan_meier_nadir.png/pdf\n\n")
+  ggsave("kaplan_meier_nadir.png", print(p_km), width = 10, height = 10, dpi = 300)
+  ggsave("kaplan_meier_nadir.pdf", print(p_km), width = 10, height = 10)
+  cat("Saved: kaplan_meier_nadir.png/pdf\n\n")
+
+} else {
+  # Basic ggplot version
+  surv_data_plot <- broom::tidy(surv_fit) %>%
+    mutate(activity_group = rep(c("Low baseline activity",
+                                   "Medium baseline activity",
+                                   "High baseline activity"),
+                                 times = c(sum(strata == "activity_group=Low baseline activity"),
+                                          sum(strata == "activity_group=Medium baseline activity"),
+                                          sum(strata == "activity_group=High baseline activity"))))
+
+  p_km_basic <- ggplot(surv_data_plot, aes(x = time, y = estimate, color = activity_group, fill = activity_group)) +
+    geom_step(linewidth = 1) +
+    geom_ribbon(aes(ymin = conf.low, ymax = conf.high), alpha = 0.2, color = NA) +
+    scale_color_manual(values = c("Low baseline activity" = "#D32F2F",
+                                   "Medium baseline activity" = "#FFA000",
+                                   "High baseline activity" = "#388E3C")) +
+    scale_fill_manual(values = c("Low baseline activity" = "#D32F2F",
+                                  "Medium baseline activity" = "#FFA000",
+                                  "High baseline activity" = "#388E3C")) +
+    labs(
+      title = "Time to Nadir Weight by Baseline Activity Level",
+      subtitle = sprintf("Log-rank p=%.4f", surv_diff$pvalue),
+      x = "Days from GLP-1 Initiation",
+      y = "Probability of NOT Reaching Nadir",
+      color = "Baseline Activity",
+      fill = "Baseline Activity"
+    ) +
+    theme_minimal(base_size = 12) +
+    theme(
+      plot.title = element_text(face = "bold", size = 14),
+      legend.position = "bottom"
+    )
+
+  ggsave("kaplan_meier_nadir.png", p_km_basic, width = 10, height = 8, dpi = 300)
+  ggsave("kaplan_meier_nadir.pdf", p_km_basic, width = 10, height = 8)
+  cat("Saved: kaplan_meier_nadir.png/pdf (basic version)\n\n")
+}
 
 # Calculate median time to nadir by group
 median_times <- survfit(surv_obj ~ activity_group, data = survival_data) %>%
