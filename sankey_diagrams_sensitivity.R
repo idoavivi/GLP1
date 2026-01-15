@@ -128,17 +128,46 @@ activity_categorized <- activity_by_period %>%
   )
 
 # Create wide format for alluvial plot
-transitions <- activity_categorized %>%
+# Try 3 periods first, fall back to 2 if not enough data
+transitions_3p <- activity_categorized %>%
   pivot_wider(names_from = period_group, values_from = activity_level,
               values_fill = "Missing") %>%
   filter(Baseline != "Missing", Period_1 != "Missing", Period_2 != "Missing")
 
-cat(sprintf("Patients with complete 3-period trajectory: N=%d\n", nrow(transitions)))
+cat(sprintf("Patients with complete 3-period trajectory: N=%d\n", nrow(transitions_3p)))
+
+# Check if we have enough patients for 3-period diagram
+if (nrow(transitions_3p) >= 10) {
+  # Use 3-period diagram
+  transitions <- transitions_3p
+  n_periods <- 3
+  period_labels <- c("Baseline", "1-30 days", "31-90 days")
+  cat("Using 3-period diagram\n\n")
+
+} else {
+  # Fall back to 2-period diagram (Baseline → 1-30d)
+  cat("⚠ Not enough patients for 3-period diagram. Using 2-period (Baseline → 1-30d)\n\n")
+
+  transitions <- activity_categorized %>%
+    pivot_wider(names_from = period_group, values_from = activity_level,
+                values_fill = "Missing") %>%
+    filter(Baseline != "Missing", Period_1 != "Missing") %>%
+    select(person_id, mean_steps, Baseline, Period_1)
+
+  n_periods <- 2
+  period_labels <- c("Baseline", "1-30 days")
+}
 
 # Count transitions
-transition_counts <- transitions %>%
-  count(Baseline, Period_1, Period_2) %>%
-  rename(Freq = n)
+if (n_periods == 3) {
+  transition_counts <- transitions %>%
+    count(Baseline, Period_1, Period_2) %>%
+    rename(Freq = n)
+} else {
+  transition_counts <- transitions %>%
+    count(Baseline, Period_1) %>%
+    rename(Freq = n)
+}
 
 cat("\nTransition counts:\n")
 print(transition_counts)
@@ -147,34 +176,44 @@ cat("\n")
 write_csv(transition_counts, "sankey_activity_transitions_data.csv")
 
 # Create alluvial diagram using ggalluvial
-alluvial_data <- to_lodes_form(transitions %>% select(Baseline, Period_1, Period_2),
-                               key = "Period",
-                               axes = 1:3)
+if (nrow(transitions) == 0) {
+  cat("⚠ No patients with activity transitions. Skipping diagram.\n\n")
+} else {
+  if (n_periods == 3) {
+    alluvial_data <- to_lodes_form(transitions %>% select(Baseline, Period_1, Period_2),
+                                   key = "Period",
+                                   axes = 1:3)
+  } else {
+    alluvial_data <- to_lodes_form(transitions %>% select(Baseline, Period_1),
+                                   key = "Period",
+                                   axes = 1:2)
+  }
 
-p_activity <- ggplot(alluvial_data,
-                      aes(x = Period, stratum = stratum, alluvium = alluvium,
-                          fill = stratum, label = stratum)) +
-  geom_flow(stat = "alluvium", alpha = 0.5) +
-  geom_stratum(alpha = 0.8) +
-  geom_text(stat = "stratum", size = 3.5) +
-  scale_fill_manual(values = c("Low" = "#D32F2F", "Medium" = "#FFA000", "High" = "#388E3C")) +
-  scale_x_discrete(limits = c("Baseline", "Period_1", "Period_2"),
-                   labels = c("Baseline", "1-30 days", "31-90 days")) +
-  labs(
-    title = "Activity Level Transitions Over Time",
-    subtitle = "Steps per day (low/medium/high tertiles)",
-    x = "Time Period",
-    y = "Number of Patients"
-  ) +
-  theme_minimal(base_size = 12) +
-  theme(
-    legend.position = "none",
-    plot.title = element_text(face = "bold", size = 14)
-  )
+  p_activity <- ggplot(alluvial_data,
+                        aes(x = Period, stratum = stratum, alluvium = alluvium,
+                            fill = stratum, label = stratum)) +
+    geom_flow(stat = "alluvium", alpha = 0.5) +
+    geom_stratum(alpha = 0.8) +
+    geom_text(stat = "stratum", size = 3.5) +
+    scale_fill_manual(values = c("Low" = "#D32F2F", "Medium" = "#FFA000", "High" = "#388E3C")) +
+    scale_x_discrete(limits = if (n_periods == 3) c("Baseline", "Period_1", "Period_2") else c("Baseline", "Period_1"),
+                     labels = period_labels) +
+    labs(
+      title = "Activity Level Transitions Over Time",
+      subtitle = sprintf("Steps per day (low/medium/high tertiles), N=%d", nrow(transitions)),
+      x = "Time Period",
+      y = "Number of Patients"
+    ) +
+    theme_minimal(base_size = 12) +
+    theme(
+      legend.position = "none",
+      plot.title = element_text(face = "bold", size = 14)
+    )
 
-ggsave("sankey_activity_transitions.png", p_activity, width = 10, height = 8, dpi = 300)
-ggsave("sankey_activity_transitions.pdf", p_activity, width = 10, height = 8)
-cat("Saved: sankey_activity_transitions.png/pdf\n\n")
+  ggsave("sankey_activity_transitions.png", p_activity, width = 10, height = 8, dpi = 300)
+  ggsave("sankey_activity_transitions.pdf", p_activity, width = 10, height = 8)
+  cat("Saved: sankey_activity_transitions.png/pdf\n\n")
+}
 
 # =============================================================================
 # DIAGRAM 2: BMI CLASS → WEIGHT RESPONSE
