@@ -337,26 +337,33 @@ cat("========================================\n\n")
 if (use_median) {
   activity_long_for_wide <- activity_summary %>%
     mutate(
-      steps_value = sprintf("%d (%.0f, %.0f)", n, median_steps, q75_steps - q25_steps),
-      mvpa_value = sprintf("%d (%.0f, %.0f)", n, median_mvpa, q75_mvpa - q25_mvpa),
-      sedentary_value = sprintf("%d (%.0f, %.0f)", n, median_sedentary, q75_sedentary - q25_sedentary),
-      calories_value = sprintf("%d (%.0f, %.0f)", n, median_calories, q75_calories - q25_calories)
+      steps_value = sprintf("%.0f (%.0f-%.0f)", median_steps, q25_steps, q75_steps),
+      mvpa_value = sprintf("%.0f (%.0f-%.0f)", median_mvpa, q25_mvpa, q75_mvpa),
+      sedentary_value = sprintf("%.0f (%.0f-%.0f)", median_sedentary, q25_sedentary, q75_sedentary),
+      calories_value = sprintf("%.0f (%.0f-%.0f)", median_calories, q25_calories, q75_calories)
     ) %>%
     select(period, n, steps_value, mvpa_value, sedentary_value, calories_value)
 
-  value_format_note <- "Values shown as N (Median, IQR)."
+  value_format_note <- "Values shown as Median (Q25-Q75). Sample sizes vary by period (see Methods)."
 } else {
   activity_long_for_wide <- activity_summary %>%
     mutate(
-      steps_value = sprintf("%d (%.0f ± %.0f)", n, mean_steps, sd_steps),
-      mvpa_value = sprintf("%d (%.0f ± %.0f)", n, mean_mvpa, sd_mvpa),
-      sedentary_value = sprintf("%d (%.0f ± %.0f)", n, mean_sedentary, sd_sedentary),
-      calories_value = sprintf("%d (%.0f ± %.0f)", n, mean_calories, sd_calories)
+      steps_value = sprintf("%.0f ± %.0f", mean_steps, sd_steps),
+      mvpa_value = sprintf("%.0f ± %.0f", mean_mvpa, sd_mvpa),
+      sedentary_value = sprintf("%.0f ± %.0f", mean_sedentary, sd_sedentary),
+      calories_value = sprintf("%.0f ± %.0f", mean_calories, sd_calories)
     ) %>%
     select(period, n, steps_value, mvpa_value, sedentary_value, calories_value)
 
-  value_format_note <- "Values shown as N (Mean ± SD)."
+  value_format_note <- "Values shown as Mean ± SD. Sample sizes vary by period (see Methods)."
 }
+
+# Sample sizes row
+n_row <- activity_long_for_wide %>%
+  select(period, n) %>%
+  pivot_wider(names_from = period, values_from = n) %>%
+  mutate(Parameter = "N", .before = 1) %>%
+  mutate(across(where(is.numeric), as.character))
 
 # Steps
 steps_wide <- activity_long_for_wide %>%
@@ -420,6 +427,8 @@ calories_pvalue_row <- tibble(
 
 # Combine all
 table2_activity <- bind_rows(
+  n_row,
+  tibble(Parameter = "", Baseline = "", `1-30 days` = "", `31-90 days` = "", `91-180 days` = "", `181-365 days` = ""),
   steps_wide,
   steps_pvalue_row,
   mvpa_wide,
@@ -449,11 +458,11 @@ table2_html <- table2_activity %>%
   footnote(
     general = c(
       value_format_note,
+      "N = number of patients with ≥3 valid days in each period.",
       "P-values from linear mixed effects models comparing each period to baseline.",
       "Mixed effects models are robust to non-normality with sufficient sample size.",
-      paste0("Fixed baseline cohort: N=", nrow(baseline_cohort_fixed), " patients."),
-      "Baseline = patients with ≥3 valid days in baseline AND 1-30d follow-up.",
-      "Follow-up periods = patients with ≥3 valid days in that specific period."
+      paste0("Fixed baseline cohort: N=", nrow(baseline_cohort_fixed), " patients with baseline and early follow-up data."),
+      "Sample sizes vary by period: not all patients have sufficient data in later periods."
     ),
     general_title = "Notes:",
     footnote_as_chunk = TRUE
