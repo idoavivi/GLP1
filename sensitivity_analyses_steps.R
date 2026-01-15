@@ -139,7 +139,7 @@ baseline_chars <- baseline_cohort %>%
 if (exists("person") && is.data.frame(person)) {
   baseline_chars <- baseline_chars %>%
     left_join(
-      person %>% select(person_id, sex = sex_at_birth),
+      person %>% select(person_id, sex),
       by = "person_id"
     )
 }
