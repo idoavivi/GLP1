@@ -206,16 +206,19 @@ activity_params <- c(
 periods <- c("Baseline", "1-30d", "31-90d", "91-180d", "181-365d", "Nadir")
 
 # Run normality tests
+# NOTE: Use .data$period to avoid conflict with lubridate::period() function
 normality_results <- expand_grid(
   period = periods,
   parameter = activity_params
 ) %>%
   rowwise() %>%
   mutate(
+    period_val = period,  # Store period value
+    param_val = parameter,  # Store parameter value
     test_result = list(test_normality(
-      person_period_means %>% filter(period == !!period),
-      parameter,
-      period
+      person_period_means %>% filter(.data$period == period_val),
+      param_val,
+      period_val
     ))
   ) %>%
   ungroup() %>%
