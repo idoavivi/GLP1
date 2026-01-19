@@ -35,12 +35,32 @@ if (has_data_in_memory) {
   if (exists("bmi_final")) bmi_data <- bmi_final
   if (exists("drug_final")) drug_glp1_clean <- drug_final
   if (exists("glp1_initiation_final")) glp1_initiation <- glp1_initiation_final
-} else {
-  cat("Loading from file: glp1_cleaned_data.RData\n")
-  load("glp1_cleaned_data.RData")
-}
 
-cat(sprintf("  Obesity cohort: %d patients\n\n", nrow(obesity_cohort)))
+  cat(sprintf("  Obesity cohort: %d patients\n\n", nrow(obesity_cohort)))
+} else {
+  # Try loading from RData file
+  if (file.exists("glp1_cleaned_data.RData")) {
+    cat("Loading from file: glp1_cleaned_data.RData\n")
+    load("glp1_cleaned_data.RData")
+    cat(sprintf("  Obesity cohort: %d patients\n\n", nrow(obesity_cohort)))
+  } else {
+    # Data not found - provide helpful error message
+    stop(paste(
+      "\n❌ ERROR: Required data not found in memory or files.\n\n",
+      "This script requires data objects from a prior data preparation script.\n\n",
+      "SOLUTION: Run one of these data preparation scripts first:\n",
+      "  1. comprehensive_data_cleaning.R (recommended)\n",
+      "  2. primary_analysis.R\n",
+      "  3. table2_activity_adaptive.R\n\n",
+      "These scripts will load data from BigQuery and create the required objects:\n",
+      "  - obesity_cohort\n",
+      "  - activity_cleaned\n",
+      "  - weight_cleaned\n",
+      "  - bmi_data\n\n",
+      "Then re-run this script in the same R session.\n"
+    ))
+  }
+}
 
 # =============================================================================
 # DEFINE BASELINE COHORT
