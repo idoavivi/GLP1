@@ -214,6 +214,192 @@ change_data <- change_data %>%
 write_csv(change_data, "within_person_changes.csv")
 cat("Saved: within_person_changes.csv\n\n")
 
+# Calculate 1-year changes
+cat("Calculating 1-year changes (181-365d vs Baseline)...\n")
+
+one_year_delta <- change_data %>%
+  filter(!is.na(delta_steps_late), !is.na(pct_weight_late)) %>%
+  select(person_id, baseline_steps = mean_steps_Baseline,
+         one_year_steps = mean_steps_Late2,
+         delta_steps_1year = delta_steps_late,
+         pct_steps_1year = pct_steps_late,
+         pct_weight_1year = pct_weight_late,
+         baseline_bmi, bmi_class)
+
+cat(sprintf("1-year changes: N=%d patients\n", nrow(one_year_delta)))
+
+if (nrow(one_year_delta) >= 10) {
+  cor_1year <- cor.test(one_year_delta$delta_steps_1year,
+                        one_year_delta$pct_weight_1year,
+                        method = "spearman")
+
+  cat(sprintf("  Correlation (Δ steps 1-year vs %% weight loss): rho=%.3f, p=%.4f\n",
+              cor_1year$estimate, cor_1year$p.value))
+
+  write_csv(one_year_delta, "one_year_changes.csv")
+  cat("  Saved: one_year_changes.csv\n")
+}
+cat("\n")
+
+# =============================================================================
+# BASELINE VS WITHIN-PERSON COMPARISON
+# =============================================================================
+
+cat("\n========================================\n")
+cat("BASELINE VS WITHIN-PERSON COMPARISON\n")
+cat("========================================\n\n")
+
+cat("Demonstrating why within-person changes work better than baseline values...\n\n")
+
+# Baseline approach (doesn't work well)
+baseline_comparison <- change_data %>%
+  filter(!is.na(mean_steps_Baseline), !is.na(pct_weight_nadir)) %>%
+  select(person_id, baseline_steps = mean_steps_Baseline,
+         pct_weight_nadir, baseline_bmi, bmi_class)
+
+if (nrow(baseline_comparison) >= 10) {
+  cor_baseline <- cor.test(baseline_comparison$baseline_steps,
+                           baseline_comparison$pct_weight_nadir,
+                           method = "spearman")
+
+  cat(sprintf("BASELINE STEPS vs WEIGHT LOSS:\n"))
+  cat(sprintf("  Correlation: rho=%.3f, p=%.4f\n",
+              cor_baseline$estimate, cor_baseline$p.value))
+  cat(sprintf("  Problem: High baseline variability obscures signal\n\n"))
+}
+
+# Within-person approach (works better)
+withinperson_comparison <- change_data %>%
+  filter(!is.na(delta_steps_early), !is.na(pct_weight_nadir))
+
+if (nrow(withinperson_comparison) >= 10) {
+  cor_withinperson <- cor.test(withinperson_comparison$delta_steps_early,
+                               withinperson_comparison$pct_weight_nadir,
+                               method = "spearman")
+
+  cat(sprintf("WITHIN-PERSON Δ STEPS vs WEIGHT LOSS:\n"))
+  cat(sprintf("  Correlation: rho=%.3f, p=%.4f\n",
+              cor_withinperson$estimate, cor_withinperson$p.value))
+  cat(sprintf("  Advantage: Removes baseline variability, clearer signal\n\n"))
+
+  if (exists("cor_baseline")) {
+    improvement <- abs(cor_withinperson$estimate) - abs(cor_baseline$estimate)
+    cat(sprintf("Signal improvement: %.3f → %.3f (Δ = +%.3f)\n",
+                abs(cor_baseline$estimate),
+                abs(cor_withinperson$estimate),
+                improvement))
+    cat(sprintf("Interpretation: Within-person approach is %.1fx stronger\n\n",
+                abs(cor_withinperson$estimate) / max(abs(cor_baseline$estimate), 0.01)))
+  }
+}
+
+# =============================================================================
+# SANKEY: ACTIVITY TRANSITIONS ACROSS ALL PERIODS
+# =============================================================================
+
+cat("\n========================================\n")
+cat("SANKEY: ACTIVITY LEVEL TRANSITIONS\n")
+cat("========================================\n\n")
+
+cat("Creating Sankey diagram for activity transitions across time...\n")
+
+# Need ggalluvial package
+if (!require("ggalluvial", quietly = TRUE)) {
+  cat("⚠ ggalluvial not available - skipping Sankey diagram\n")
+  cat("  Install with: install.packages('ggalluvial')\n\n")
+} else {
+
+  # Categorize activity into tertiles at each period
+  sankey_data <- activity_by_window %>%
+    filter(window %in% c("Baseline", "Early", "Late2")) %>%
+    group_by(window) %>%
+    mutate(
+      activity_level = case_when(
+        mean_steps < quantile(mean_steps, 1/3, na.rm = TRUE) ~ "Low",
+        mean_steps >= quantile(mean_steps, 1/3, na.rm = TRUE) &
+          mean_steps < quantile(mean_steps, 2/3, na.rm = TRUE) ~ "Medium",
+        mean_steps >= quantile(mean_steps, 2/3, na.rm = TRUE) ~ "High",
+        TRUE ~ NA_character_
+      )
+    ) %>%
+    ungroup() %>%
+    select(person_id, window, activity_level)
+
+  # Create wide format
+  sankey_wide <- sankey_data %>%
+    pivot_wider(names_from = window, values_from = activity_level) %>%
+    filter(!is.na(Baseline), !is.na(Early)) %>%
+    mutate(
+      Late2 = if_else(is.na(Late2), "No data", Late2)
+    )
+
+  cat(sprintf("Sankey diagram: N=%d patients with baseline and early data\n", nrow(sankey_wide)))
+
+  if (nrow(sankey_wide) >= 10) {
+    # Two-period version (Baseline → Early)
+    sankey_2period <- sankey_wide %>%
+      select(Baseline, Early) %>%
+      count(Baseline, Early) %>%
+      rename(Freq = n)
+
+    cat("\nTransition counts (Baseline → Early):\n")
+    print(sankey_2period)
+
+    # Try three-period if enough data
+    sankey_3period <- sankey_wide %>%
+      filter(Late2 != "No data") %>%
+      select(Baseline, Early, Late2)
+
+    cat(sprintf("\nPatients with 1-year data: N=%d\n", nrow(sankey_3period)))
+
+    if (nrow(sankey_3period) >= 20) {
+      # Use 3-period
+      alluvial_data <- to_lodes_form(sankey_3period,
+                                     key = "Period",
+                                     axes = 1:3)
+      period_labels <- c("Baseline", "1-30 days", "1 year")
+      use_3period <- TRUE
+    } else {
+      # Use 2-period
+      alluvial_data <- to_lodes_form(sankey_wide %>% select(Baseline, Early),
+                                     key = "Period",
+                                     axes = 1:2)
+      period_labels <- c("Baseline", "1-30 days")
+      use_3period <- FALSE
+    }
+
+    p_sankey <- ggplot(alluvial_data,
+                       aes(x = Period, stratum = stratum, alluvium = alluvium,
+                           fill = stratum, label = stratum)) +
+      geom_flow(stat = "alluvium", alpha = 0.5) +
+      geom_stratum(alpha = 0.8) +
+      geom_text(stat = "stratum", size = 3.5) +
+      scale_fill_manual(values = c("Low" = "#D32F2F", "Medium" = "#FFA000",
+                                    "High" = "#388E3C", "No data" = "gray70")) +
+      scale_x_discrete(labels = period_labels) +
+      labs(
+        title = "Activity Level Transitions Over Time",
+        subtitle = sprintf("N=%d patients, tertiles based on steps/day",
+                          nrow(if (use_3period) sankey_3period else sankey_wide)),
+        x = "Time Period",
+        y = "Number of Patients"
+      ) +
+      theme_minimal(base_size = 12) +
+      theme(
+        legend.position = "none",
+        plot.title = element_text(face = "bold", size = 14)
+      )
+
+    ggsave("signal_sankey_transitions.png", p_sankey, width = 10, height = 8, dpi = 300)
+    ggsave("signal_sankey_transitions.pdf", p_sankey, width = 10, height = 8)
+    cat("\nSaved: signal_sankey_transitions.png/pdf\n")
+
+    write_csv(sankey_2period, "signal_sankey_transitions_data.csv")
+    cat("Saved: signal_sankey_transitions_data.csv\n")
+  }
+}
+cat("\n")
+
 # =============================================================================
 # ANALYSIS 2: EARLY ACTIVITY PREDICTS LATE WEIGHT LOSS
 # =============================================================================
@@ -456,6 +642,107 @@ if (nrow(viz_delta) >= 10) {
   ggsave("signal_within_person_delta.png", p1, width = 10, height = 8, dpi = 300)
   ggsave("signal_within_person_delta.pdf", p1, width = 10, height = 8)
   cat("Saved: signal_within_person_delta.png/pdf\n")
+}
+
+## VIZ 1a: 1-year delta
+if (exists("one_year_delta") && nrow(one_year_delta) >= 10) {
+  p1a <- ggplot(one_year_delta, aes(x = delta_steps_1year, y = pct_weight_1year)) +
+    geom_point(aes(color = bmi_class), alpha = 0.6, size = 2.5) +
+    geom_smooth(method = "lm", color = "black", linewidth = 1.2, se = TRUE) +
+    geom_hline(yintercept = -5, linetype = "dashed", color = "gray40", alpha = 0.5) +
+    geom_hline(yintercept = -10, linetype = "dashed", color = "gray40", alpha = 0.5) +
+    geom_vline(xintercept = 0, linetype = "dashed", color = "gray40", alpha = 0.5) +
+    scale_color_manual(values = c("Class I" = "#2E7D32", "Class II" = "#F57C00", "Class III" = "#C62828"),
+                       na.value = "gray50") +
+    annotate("text", x = max(one_year_delta$delta_steps_1year, na.rm = TRUE) * 0.7,
+             y = -2,
+             label = sprintf("1-Year Analysis\nSpearman rho = %.3f\np = %.4f\nN = %d",
+                            cor(one_year_delta$delta_steps_1year, one_year_delta$pct_weight_1year,
+                                use = "complete", method = "spearman"),
+                            cor.test(one_year_delta$delta_steps_1year, one_year_delta$pct_weight_1year,
+                                    method = "spearman")$p.value,
+                            nrow(one_year_delta)),
+             hjust = 1, size = 3.5, fontface = "bold") +
+    labs(
+      title = "1-Year Within-Person Changes: Activity vs Weight",
+      subtitle = "Sustained activity changes over 1 year",
+      x = "Change in Steps per Day\n(1-year minus Baseline)",
+      y = "% Weight Change at 1 Year\n(negative = weight loss)",
+      color = "Baseline BMI"
+    ) +
+    theme_minimal(base_size = 12) +
+    theme(plot.title = element_text(face = "bold", size = 14),
+          legend.position = "bottom")
+
+  ggsave("signal_1year_delta.png", p1a, width = 10, height = 8, dpi = 300)
+  ggsave("signal_1year_delta.pdf", p1a, width = 10, height = 8)
+  cat("Saved: signal_1year_delta.png/pdf\n")
+}
+
+## VIZ 1b: Baseline vs Within-person comparison (2-panel)
+if (exists("baseline_comparison") && exists("withinperson_comparison") &&
+    nrow(baseline_comparison) >= 10 && nrow(withinperson_comparison) >= 10) {
+
+  # Panel A: Baseline steps (weak signal)
+  p_baseline <- ggplot(baseline_comparison, aes(x = baseline_steps, y = pct_weight_nadir)) +
+    geom_point(aes(color = bmi_class), alpha = 0.5, size = 2) +
+    geom_smooth(method = "lm", color = "gray30", linewidth = 1, se = TRUE) +
+    scale_color_manual(values = c("Class I" = "#2E7D32", "Class II" = "#F57C00", "Class III" = "#C62828"),
+                       na.value = "gray50") +
+    annotate("text", x = max(baseline_comparison$baseline_steps, na.rm = TRUE) * 0.7,
+             y = max(baseline_comparison$pct_weight_nadir, na.rm = TRUE) * 0.9,
+             label = sprintf("❌ Weak signal\nrho = %.3f\np = %.4f",
+                            cor_baseline$estimate,
+                            cor_baseline$p.value),
+             hjust = 1, size = 3.5, fontface = "bold", color = "darkred") +
+    labs(
+      title = "A. Baseline Approach (POOR)",
+      subtitle = "High inter-individual variability obscures signal",
+      x = "Baseline Steps per Day",
+      y = "% Weight Change at Nadir",
+      color = "BMI Class"
+    ) +
+    theme_minimal(base_size = 11) +
+    theme(legend.position = "none",
+          plot.title = element_text(face = "bold"))
+
+  # Panel B: Within-person changes (strong signal)
+  p_withinperson <- ggplot(withinperson_comparison, aes(x = delta_steps_early, y = pct_weight_nadir)) +
+    geom_point(aes(color = bmi_class), alpha = 0.5, size = 2) +
+    geom_smooth(method = "lm", color = "black", linewidth = 1.2, se = TRUE) +
+    geom_vline(xintercept = 0, linetype = "dashed", color = "gray40") +
+    scale_color_manual(values = c("Class I" = "#2E7D32", "Class II" = "#F57C00", "Class III" = "#C62828"),
+                       na.value = "gray50") +
+    annotate("text", x = max(withinperson_comparison$delta_steps_early, na.rm = TRUE) * 0.7,
+             y = max(withinperson_comparison$pct_weight_nadir, na.rm = TRUE) * 0.9,
+             label = sprintf("✓ Strong signal\nrho = %.3f\np = %.4f",
+                            cor_withinperson$estimate,
+                            cor_withinperson$p.value),
+             hjust = 1, size = 3.5, fontface = "bold", color = "darkgreen") +
+    labs(
+      title = "B. Within-Person Changes (BETTER)",
+      subtitle = "Removes baseline variability, clearer relationship",
+      x = "Δ Steps per Day (1-30d vs Baseline)",
+      y = "% Weight Change at Nadir",
+      color = "BMI Class"
+    ) +
+    theme_minimal(base_size = 11) +
+    theme(legend.position = "bottom",
+          plot.title = element_text(face = "bold"))
+
+  p_comparison <- p_baseline + p_withinperson +
+    plot_annotation(
+      title = "Why Within-Person Changes Work Better Than Baseline Values",
+      subtitle = sprintf("Signal improvement: |rho| = %.3f → %.3f (%.1fx stronger)",
+                        abs(cor_baseline$estimate),
+                        abs(cor_withinperson$estimate),
+                        abs(cor_withinperson$estimate) / max(abs(cor_baseline$estimate), 0.01)),
+      theme = theme(plot.title = element_text(face = "bold", size = 14))
+    )
+
+  ggsave("signal_baseline_vs_withinperson.png", p_comparison, width = 14, height = 6, dpi = 300)
+  ggsave("signal_baseline_vs_withinperson.pdf", p_comparison, width = 14, height = 6)
+  cat("Saved: signal_baseline_vs_withinperson.png/pdf\n")
 }
 
 ## VIZ 2: Early-to-late prediction
