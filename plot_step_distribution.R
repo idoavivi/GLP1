@@ -27,21 +27,36 @@ class_stats <- analysis1_data %>%
     median_label = sprintf("%.0f", median_steps)
   )
 
-# Create overlapping density plot with median lines
+# Stagger median label positions to avoid overlap
+class_stats <- class_stats %>%
+  mutate(
+    label_y = seq(95, 75, length.out = n()),  # Stagger from 95% to 75%
+    label_vjust = -0.5
+  )
+
+# Create overlapping density plot with median lines (scaled to percentage)
 p_density <- ggplot(analysis1_data, aes(x = avg_steps, fill = bmi_class, color = bmi_class)) +
-  # Density curves
-  geom_density(alpha = 0.3, linewidth = 1) +
+  # Density curves (scaled to 0-100%)
+  geom_density(aes(y = after_stat(scaled) * 100), alpha = 0.3, linewidth = 1) +
 
   # Vertical median lines for each BMI class
   geom_vline(data = class_stats,
              aes(xintercept = median_steps, color = bmi_class),
              linetype = "dashed", linewidth = 0.8, show.legend = FALSE) +
 
-  # Median value annotations at top of plot
+  # Median value annotations - staggered positions to avoid overlap
   geom_text(data = class_stats,
-            aes(x = median_steps, label = median_label, color = bmi_class),
-            y = Inf, vjust = 1.5, hjust = 0.5, size = 3.5, fontface = "bold",
+            aes(x = median_steps, y = label_y, label = median_label, color = bmi_class),
+            vjust = -0.5, hjust = 0.5, size = 3.5, fontface = "bold",
             show.legend = FALSE) +
+
+  # Add small arrows or lines connecting labels to their median lines
+  geom_segment(data = class_stats,
+               aes(x = median_steps, xend = median_steps,
+                   y = label_y - 2, yend = 100,
+                   color = bmi_class),
+               linetype = "dotted", linewidth = 0.4,
+               show.legend = FALSE) +
 
   # Color scales
   scale_fill_brewer(palette = "RdYlBu", direction = -1,
@@ -53,14 +68,16 @@ p_density <- ggplot(analysis1_data, aes(x = avg_steps, fill = bmi_class, color =
   scale_x_continuous(labels = scales::comma,
                      limits = c(0, 20000),
                      breaks = seq(0, 20000, 2500)) +
-  scale_y_continuous(labels = scales::scientific) +
+  scale_y_continuous(limits = c(0, 100),
+                     breaks = seq(0, 100, 20),
+                     labels = function(x) paste0(x, "%")) +
 
   # Labels
   labs(
     title = "Distribution of Daily Steps by BMI Class",
-    subtitle = "Dashed lines show median steps per class. BMI < 18.5 excluded.",
+    subtitle = "Dashed lines show median steps per class (values labeled above). BMI < 18.5 excluded.",
     x = "Average Daily Steps",
-    y = "Density"
+    y = "Participants (%, scaled within BMI class)"
   ) +
 
   # Theme
@@ -70,7 +87,7 @@ p_density <- ggplot(analysis1_data, aes(x = avg_steps, fill = bmi_class, color =
     legend.title = element_text(face = "bold"),
     panel.grid.minor = element_blank(),
     plot.title = element_text(face = "bold", size = 16),
-    plot.subtitle = element_text(size = 12, color = "gray30")
+    plot.subtitle = element_text(size = 11, color = "gray30")
   )
 
 # Save plot
