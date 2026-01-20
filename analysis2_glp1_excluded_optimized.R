@@ -24,6 +24,11 @@ cat("STEP 1: Loading drug exposure data\n")
 cat("========================================\n\n")
 
 # Check if data already loaded from system-generated code
+# First, look for any drug-related dataframes
+drug_vars <- ls(pattern = "drug", envir = .GlobalEnv)
+cat(sprintf("Found %d drug-related objects in memory: %s\n",
+            length(drug_vars), paste(drug_vars, collapse = ", ")))
+
 if (exists("dataset_98104042_drug_df") && is.data.frame(dataset_98104042_drug_df)) {
   cat("✓ Using pre-loaded drug exposure data (dataset_98104042_drug_df)\n")
   drug_raw <- dataset_98104042_drug_df
@@ -34,33 +39,17 @@ if (exists("dataset_98104042_drug_df") && is.data.frame(dataset_98104042_drug_df
   cat("✓ Using pre-loaded drug exposure data (dataset_50785095_drug_exposure_df)\n")
   drug_raw <- dataset_50785095_drug_exposure_df
 } else {
-  cat("Loading drug exposure from BigQuery...\n")
-
-  drug_sql <- paste("
-    SELECT
-        d_exposure.person_id,
-        d_exposure.drug_concept_id,
-        d_standard_concept.concept_name as standard_concept_name,
-        d_exposure.drug_exposure_start_datetime,
-        d_exposure.drug_exposure_end_datetime,
-        d_exposure.route_concept_id,
-        d_route.concept_name as route_concept_name
-    FROM `drug_exposure` d_exposure
-    LEFT JOIN `concept` d_standard_concept
-        ON d_exposure.drug_concept_id = d_standard_concept.concept_id
-    LEFT JOIN `concept` d_route
-        ON d_exposure.route_concept_id = d_route.concept_id
-    WHERE d_exposure.person_id IN (
-        SELECT DISTINCT person_id
-        FROM `cb_search_person`
-        WHERE has_fitbit = 1
-    )
-  ")
-
-  drug_raw <- bq_table_download(
-    bq_dataset_query(Sys.getenv("WORKSPACE_CDR"), drug_sql,
-                     billing = Sys.getenv("GOOGLE_PROJECT"))
-  )
+  stop(paste(
+    "\n❌ ERROR: No pre-loaded drug exposure data found.\n\n",
+    "Please run the system-generated data export code first to load drug_df.\n",
+    "The drug exposure table is too large (~9 million rows) to download directly.\n\n",
+    "Expected variable names:\n",
+    "  - dataset_98104042_drug_df\n",
+    "  - dataset_23119529_drug_df\n",
+    "  - dataset_50785095_drug_exposure_df\n\n",
+    "Found in memory: ", paste(drug_vars, collapse = ", "), "\n\n",
+    "If you have drug data with a different name, please rename it to one of the above.\n"
+  ))
 }
 
 cat(sprintf("Loaded: %s drug records\n\n", format(nrow(drug_raw), big.mark = ",")))
