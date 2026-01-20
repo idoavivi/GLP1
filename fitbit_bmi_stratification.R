@@ -43,7 +43,13 @@ cat("========================================\n\n")
 # Check if data already loaded from system-generated code
 if (exists("dataset_50785095_fitbit_activity_df") && is.data.frame(dataset_50785095_fitbit_activity_df)) {
   cat("✓ Using pre-loaded activity data (dataset_50785095_fitbit_activity_df)\n")
+  cat("  Copying data... (this may take a moment for large datasets)\n")
   activity_raw <- dataset_50785095_fitbit_activity_df
+  cat("  ✓ Data loaded\n")
+  cat(sprintf("  Records: %s rows\n", format(nrow(activity_raw), big.mark = ",")))
+  cat("  Computing unique participants...\n")
+  n_participants <- length(unique(activity_raw$person_id))
+  cat(sprintf("  Participants: %s\n\n", format(n_participants, big.mark = ",")))
 } else {
   cat("Loading Fitbit activity from BigQuery...\n")
   activity_sql <- paste("
@@ -68,10 +74,10 @@ if (exists("dataset_50785095_fitbit_activity_df") && is.data.frame(dataset_50785
     bq_dataset_query(Sys.getenv("WORKSPACE_CDR"), activity_sql,
                      billing = Sys.getenv("GOOGLE_PROJECT"))
   )
+  cat(sprintf("Loaded: %s records from %s participants\n\n",
+              format(nrow(activity_raw), big.mark = ","),
+              format(length(unique(activity_raw$person_id)), big.mark = ",")))
 }
-
-cat(sprintf("Loaded: %d activity records from %d participants\n\n",
-            nrow(activity_raw), n_distinct(activity_raw$person_id)))
 
 # =============================================================================
 # STEP 2: LOAD WEIGHT AND HEIGHT DATA
@@ -84,6 +90,7 @@ cat("========================================\n\n")
 # Check if measurement data already loaded from system-generated code
 if (exists("dataset_50785095_measurement_df") && is.data.frame(dataset_50785095_measurement_df)) {
   cat("✓ Using pre-loaded measurement data (dataset_50785095_measurement_df)\n")
+  cat("  Extracting weight records...\n")
 
   # Extract weight records (concept_id 3025315 or any weight-related concepts)
   weight_raw <- dataset_50785095_measurement_df %>%
@@ -97,6 +104,7 @@ if (exists("dataset_50785095_measurement_df") && is.data.frame(dataset_50785095_
     ) %>%
     select(person_id, measurement_date, weight_kg, measurement_datetime)
 
+  cat("  Extracting height records...\n")
   # Extract height records (concept_id 3036277 or any height-related concepts)
   height_raw <- dataset_50785095_measurement_df %>%
     filter(
@@ -155,10 +163,8 @@ if (exists("dataset_50785095_measurement_df") && is.data.frame(dataset_50785095_
   )
 }
 
-cat(sprintf("Weight: %d records from %d participants\n",
-            nrow(weight_raw), n_distinct(weight_raw$person_id)))
-cat(sprintf("Height: %d records from %d participants\n\n",
-            nrow(height_raw), n_distinct(height_raw$person_id)))
+cat(sprintf("  Weight: %s records\n", format(nrow(weight_raw), big.mark = ",")))
+cat(sprintf("  Height: %s records\n\n", format(nrow(height_raw), big.mark = ",")))
 
 # =============================================================================
 # STEP 3: CLEAN ACTIVITY DATA
@@ -168,7 +174,8 @@ cat("========================================\n")
 cat("STEP 3: Cleaning activity data\n")
 cat("========================================\n\n")
 
-cat(sprintf("Before cleaning: %d records\n", nrow(activity_raw)))
+cat(sprintf("Before cleaning: %s records\n", format(nrow(activity_raw), big.mark = ",")))
+cat("Applying validity filters... (this may take a few minutes)\n")
 
 # Apply validity filters (same as used in GLP-1 analysis)
 activity_cleaned <- activity_raw %>%
@@ -196,8 +203,8 @@ activity_cleaned <- activity_raw %>%
   ) %>%
   filter(is_valid_day == TRUE)
 
-cat(sprintf("After validity filters: %d records from %d participants\n",
-            nrow(activity_cleaned), n_distinct(activity_cleaned$person_id)))
+cat(sprintf("After validity filters: %s records\n", format(nrow(activity_cleaned), big.mark = ",")))
+cat("Counting days per participant...\n")
 
 # Filter for participants with >30 days of Fitbit data
 participant_day_counts <- activity_cleaned %>%
@@ -205,11 +212,13 @@ participant_day_counts <- activity_cleaned %>%
   summarize(n_valid_days = n(), .groups = "drop") %>%
   filter(n_valid_days > 30)
 
+cat("Filtering to participants with >30 days...\n")
 activity_cleaned <- activity_cleaned %>%
   filter(person_id %in% participant_day_counts$person_id)
 
-cat(sprintf("After >30 days filter: %d records from %d participants\n\n",
-            nrow(activity_cleaned), n_distinct(activity_cleaned$person_id)))
+cat(sprintf("After >30 days filter: %s records from %s participants\n\n",
+            format(nrow(activity_cleaned), big.mark = ","),
+            format(length(unique(activity_cleaned$person_id)), big.mark = ",")))
 
 # =============================================================================
 # STEP 4: CLEAN WEIGHT AND HEIGHT DATA
@@ -304,7 +313,7 @@ cat("\n========================================\n")
 cat("ANALYSIS 1: ACTIVITY BY BMI CLASS\n")
 cat("========================================\n\n")
 
-cat("Computing average BMI and activity per participant...\n")
+cat("Computing average BMI per participant... (this may take a moment)\n")
 
 # Calculate average BMI per participant
 participant_avg_bmi <- bmi_final %>%
@@ -326,6 +335,7 @@ participant_avg_bmi <- bmi_final %>%
     bmi_class = factor(bmi_class, levels = c("<18", "18-25", "25-30", "30-35", "35-40", "≥40"))
   )
 
+cat("Computing average activity per participant... (this may take a few minutes)\n")
 # Calculate average activity per participant
 participant_avg_activity <- activity_final %>%
   group_by(person_id) %>%
