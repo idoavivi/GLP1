@@ -27,20 +27,29 @@ class_stats <- analysis1_data %>%
     label_n = sprintf("%s (n=%s)", bmi_class, format(n, big.mark = ","))
   )
 
-# Define distinct RGB colors (blue, green, orange, magenta, red)
+# Define colors: green for healthy, blue for overweight, pink/orange/red for obesity
 bmi_colors <- c(
-  "18.5-25" = "#0066CC",  # Blue
-  "25-30"   = "#00AA00",  # Green
-  "30-35"   = "#FF8800",  # Orange
-  "35-40"   = "#CC0099",  # Magenta
-  "≥40"     = "#DD0000"   # Red
+  "18.5-25" = "#00AA00",  # Green (healthy weight)
+  "25-30"   = "#0066CC",  # Blue (overweight)
+  "30-35"   = "#FF8800",  # Orange (obesity class I)
+  "35-40"   = "#FF1493",  # Pink (obesity class II)
+  "≥40"     = "#DD0000"   # Red (obesity class III)
 )
+
+# Stagger median label positions to avoid overlap
+# Order medians from left to right and assign different y positions
+class_stats <- class_stats %>%
+  arrange(median_steps) %>%
+  mutate(
+    label_y_pct = c(18, 16, 14, 12, 10)  # Staggered heights as percentages
+  ) %>%
+  arrange(bmi_class)  # Back to factor order
 
 # Create publication-ready density plot
 p <- ggplot(analysis1_data, aes(x = avg_steps, fill = bmi_class, color = bmi_class)) +
 
-  # Density curves scaled to percentage (0-100%)
-  geom_density(aes(y = after_stat(scaled) * 100),
+  # Density curves as percentages (density * 100 for interpretability)
+  geom_density(aes(y = after_stat(density) * 100),
                alpha = 0.4, linewidth = 1.2) +
 
   # THICK median lines - very visible
@@ -49,14 +58,15 @@ p <- ggplot(analysis1_data, aes(x = avg_steps, fill = bmi_class, color = bmi_cla
              linetype = "dashed", linewidth = 1.5, alpha = 0.9,
              show.legend = FALSE) +
 
-  # Median labels at top - black text, no boxes
-  geom_text(data = class_stats,
-            aes(x = median_steps, y = 105,
-                label = format(round(median_steps), big.mark = ",")),
-            color = "black", size = 4.5, fontface = "bold",
-            angle = 0, vjust = 0, show.legend = FALSE) +
+  # Median labels - staggered to avoid overlap, black bold text
+  geom_label(data = class_stats,
+             aes(x = median_steps, y = label_y_pct,
+                 label = format(round(median_steps), big.mark = ",")),
+             color = "black", size = 4, fontface = "bold",
+             fill = "white", label.size = 0.3, label.padding = unit(0.2, "lines"),
+             show.legend = FALSE) +
 
-  # Color scales - distinct RGB colors
+  # Color scales - green/blue/pink/orange/red
   scale_fill_manual(values = bmi_colors,
                     labels = class_stats$label_n,
                     name = "BMI Class (N)") +
@@ -72,11 +82,11 @@ p <- ggplot(analysis1_data, aes(x = avg_steps, fill = bmi_class, color = bmi_cla
     expand = c(0, 0)
   ) +
 
-  # Y-axis as percentage (0-110% to fit labels)
+  # Y-axis as percentage (density * 100, more realistic range)
   scale_y_continuous(
     labels = function(x) paste0(x, "%"),
-    limits = c(0, 110),
-    breaks = seq(0, 100, 20),
+    limits = c(0, 20),
+    breaks = seq(0, 20, 5),
     expand = c(0, 0)
   ) +
 
