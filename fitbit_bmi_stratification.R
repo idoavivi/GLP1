@@ -40,7 +40,13 @@ cat("========================================\n")
 cat("STEP 1: Loading Fitbit activity data\n")
 cat("========================================\n\n")
 
-activity_sql <- paste("
+# Check if data already loaded from system-generated code
+if (exists("dataset_50785095_fitbit_activity_df") && is.data.frame(dataset_50785095_fitbit_activity_df)) {
+  cat("✓ Using pre-loaded activity data (dataset_50785095_fitbit_activity_df)\n")
+  activity_raw <- dataset_50785095_fitbit_activity_df
+} else {
+  cat("Loading Fitbit activity from BigQuery...\n")
+  activity_sql <- paste("
     SELECT
         person_id,
         date,
@@ -51,24 +57,62 @@ activity_sql <- paste("
         very_active_minutes,
         activity_calories
     FROM `activity_summary`
-")
+    WHERE person_id IN (
+        SELECT DISTINCT person_id
+        FROM `cb_search_person`
+        WHERE has_fitbit = 1
+    )
+  ")
 
-activity_raw <- bq_table_download(bq_project_query(Sys.getenv('GOOGLE_PROJECT'),
-                                                     activity_sql,
-                                                     billing = Sys.getenv('GOOGLE_PROJECT')))
+  activity_raw <- bq_table_download(bq_project_query(Sys.getenv('GOOGLE_PROJECT'),
+                                                       activity_sql,
+                                                       billing = Sys.getenv('GOOGLE_PROJECT')))
+}
 
 cat(sprintf("Loaded: %d activity records from %d participants\n\n",
             nrow(activity_raw), n_distinct(activity_raw$person_id)))
 
 # =============================================================================
-# STEP 2: LOAD WEIGHT DATA
+# STEP 2: LOAD WEIGHT AND HEIGHT DATA
 # =============================================================================
 
 cat("========================================\n")
-cat("STEP 2: Loading weight measurements\n")
+cat("STEP 2: Loading weight and height\n")
 cat("========================================\n\n")
 
-weight_sql <- paste("
+# Check if measurement data already loaded from system-generated code
+if (exists("dataset_50785095_measurement_df") && is.data.frame(dataset_50785095_measurement_df)) {
+  cat("✓ Using pre-loaded measurement data (dataset_50785095_measurement_df)\n")
+
+  # Extract weight records (concept_id 3025315 or any weight-related concepts)
+  weight_raw <- dataset_50785095_measurement_df %>%
+    filter(
+      standard_concept_name %in% c("Body weight", "Body weight Measured") |
+      measurement_concept_id == 3025315
+    ) %>%
+    mutate(
+      measurement_date = as.Date(measurement_datetime),
+      weight_kg = value_as_number
+    ) %>%
+    select(person_id, measurement_date, weight_kg, measurement_datetime)
+
+  # Extract height records (concept_id 3036277 or any height-related concepts)
+  height_raw <- dataset_50785095_measurement_df %>%
+    filter(
+      standard_concept_name %in% c("Body height", "Body height Measured") |
+      measurement_concept_id == 3036277
+    ) %>%
+    mutate(
+      measurement_date = as.Date(measurement_datetime),
+      height_cm = value_as_number
+    ) %>%
+    select(person_id, measurement_date, height_cm, measurement_datetime)
+
+} else {
+  cat("Loading weight and height from BigQuery...\n")
+
+  # Weight
+  weight_sql <- paste("
     SELECT
         person_id,
         measurement_date,
@@ -76,24 +120,19 @@ weight_sql <- paste("
         measurement_datetime
     FROM `measurement`
     WHERE measurement_concept_id = 3025315
-")
+      AND person_id IN (
+          SELECT DISTINCT person_id
+          FROM `cb_search_person`
+          WHERE has_fitbit = 1
+      )
+  ")
 
-weight_raw <- bq_table_download(bq_project_query(Sys.getenv('GOOGLE_PROJECT'),
-                                                   weight_sql,
-                                                   billing = Sys.getenv('GOOGLE_PROJECT')))
+  weight_raw <- bq_table_download(bq_project_query(Sys.getenv('GOOGLE_PROJECT'),
+                                                     weight_sql,
+                                                     billing = Sys.getenv('GOOGLE_PROJECT')))
 
-cat(sprintf("Loaded: %d weight records from %d participants\n\n",
-            nrow(weight_raw), n_distinct(weight_raw$person_id)))
-
-# =============================================================================
-# STEP 3: LOAD HEIGHT DATA
-# =============================================================================
-
-cat("========================================\n")
-cat("STEP 3: Loading height measurements\n")
-cat("========================================\n\n")
-
-height_sql <- paste("
+  # Height
+  height_sql <- paste("
     SELECT
         person_id,
         measurement_date,
@@ -101,21 +140,29 @@ height_sql <- paste("
         measurement_datetime
     FROM `measurement`
     WHERE measurement_concept_id = 3036277
-")
+      AND person_id IN (
+          SELECT DISTINCT person_id
+          FROM `cb_search_person`
+          WHERE has_fitbit = 1
+      )
+  ")
 
-height_raw <- bq_table_download(bq_project_query(Sys.getenv('GOOGLE_PROJECT'),
-                                                   height_sql,
-                                                   billing = Sys.getenv('GOOGLE_PROJECT')))
+  height_raw <- bq_table_download(bq_project_query(Sys.getenv('GOOGLE_PROJECT'),
+                                                     height_sql,
+                                                     billing = Sys.getenv('GOOGLE_PROJECT')))
+}
 
-cat(sprintf("Loaded: %d height records from %d participants\n\n",
+cat(sprintf("Weight: %d records from %d participants\n",
+            nrow(weight_raw), n_distinct(weight_raw$person_id)))
+cat(sprintf("Height: %d records from %d participants\n\n",
             nrow(height_raw), n_distinct(height_raw$person_id)))
 
 # =============================================================================
-# STEP 4: CLEAN ACTIVITY DATA
+# STEP 3: CLEAN ACTIVITY DATA
 # =============================================================================
 
 cat("========================================\n")
-cat("STEP 4: Cleaning activity data\n")
+cat("STEP 3: Cleaning activity data\n")
 cat("========================================\n\n")
 
 cat(sprintf("Before cleaning: %d records\n", nrow(activity_raw)))
@@ -162,11 +209,11 @@ cat(sprintf("After >30 days filter: %d records from %d participants\n\n",
             nrow(activity_cleaned), n_distinct(activity_cleaned$person_id)))
 
 # =============================================================================
-# STEP 5: CLEAN WEIGHT AND HEIGHT DATA
+# STEP 4: CLEAN WEIGHT AND HEIGHT DATA
 # =============================================================================
 
 cat("========================================\n")
-cat("STEP 5: Cleaning weight and height\n")
+cat("STEP 4: Cleaning weight and height\n")
 cat("========================================\n\n")
 
 # Weight filters (same as GLP-1 analysis)
@@ -199,11 +246,11 @@ cat(sprintf("Height - after filters: %d participants with height\n\n",
             nrow(height_cleaned)))
 
 # =============================================================================
-# STEP 6: COMPUTE BMI FROM WEIGHT AND HEIGHT
+# STEP 5: COMPUTE BMI FROM WEIGHT AND HEIGHT
 # =============================================================================
 
 cat("========================================\n")
-cat("STEP 6: Computing BMI\n")
+cat("STEP 5: Computing BMI\n")
 cat("========================================\n\n")
 
 # Merge weight with height to compute BMI
@@ -223,11 +270,11 @@ cat(sprintf("Computed BMI: %d records from %d participants\n\n",
             nrow(bmi_computed), n_distinct(bmi_computed$person_id)))
 
 # =============================================================================
-# STEP 7: IDENTIFY COHORT WITH BOTH FITBIT AND BMI DATA
+# STEP 6: IDENTIFY COHORT WITH BOTH FITBIT AND BMI DATA
 # =============================================================================
 
 cat("========================================\n")
-cat("STEP 7: Creating analysis cohort\n")
+cat("STEP 6: Creating analysis cohort\n")
 cat("========================================\n\n")
 
 # Participants with both Fitbit and BMI data
