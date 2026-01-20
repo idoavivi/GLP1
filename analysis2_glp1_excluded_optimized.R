@@ -24,7 +24,10 @@ cat("STEP 1: Loading drug exposure data\n")
 cat("========================================\n\n")
 
 # Check if data already loaded from system-generated code
-if (exists("dataset_23119529_drug_df") && is.data.frame(dataset_23119529_drug_df)) {
+if (exists("dataset_98104042_drug_df") && is.data.frame(dataset_98104042_drug_df)) {
+  cat("✓ Using pre-loaded drug exposure data (dataset_98104042_drug_df)\n")
+  drug_raw <- dataset_98104042_drug_df
+} else if (exists("dataset_23119529_drug_df") && is.data.frame(dataset_23119529_drug_df)) {
   cat("✓ Using pre-loaded drug exposure data (dataset_23119529_drug_df)\n")
   drug_raw <- dataset_23119529_drug_df
 } else if (exists("dataset_50785095_drug_exposure_df") && is.data.frame(dataset_50785095_drug_exposure_df)) {
