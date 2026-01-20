@@ -261,10 +261,10 @@ cat("Merging activity with transitions...\n")
 transitioner_summary <- transitioners %>%
   left_join(baseline_activity, by = "person_id") %>%
   left_join(nadir_activity, by = "person_id") %>%
-  # Filter for ≥30 days at both timepoints (out of 90-day windows)
+  # Filter for ≥5 days at both timepoints (out of 90-day windows)
   filter(
-    !is.na(n_baseline_days), n_baseline_days >= 30,
-    !is.na(n_nadir_days), n_nadir_days >= 30
+    !is.na(n_baseline_days), n_baseline_days >= 5,
+    !is.na(n_nadir_days), n_nadir_days >= 5
   ) %>%
   mutate(
     # Calculate changes
@@ -285,7 +285,7 @@ transitioner_summary <- transitioners %>%
          avg_very_active_baseline, avg_very_active_nadir,
          avg_activity_cal_baseline, avg_activity_cal_nadir)
 
-cat(sprintf("After requiring ≥30 days Fitbit data: %s participants\n\n",
+cat(sprintf("After requiring ≥5 days Fitbit data: %s participants\n\n",
             format(nrow(transitioner_summary), big.mark = ",")))
 
 if (nrow(transitioner_summary) == 0) {
