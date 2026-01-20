@@ -10,6 +10,8 @@ library(tidyverse)
 library(bigrquery)
 library(lubridate)
 library(ggalluvial)
+library(knitr)
+library(patchwork)
 
 cat("\n##################################################\n")
 cat("FITBIT ACTIVITY BY BMI STRATIFICATION\n")
@@ -359,6 +361,155 @@ cat(sprintf("  Steps: χ² = %.2f, p = %.2e\n", kw_steps$statistic, kw_steps$p.v
 cat(sprintf("  Sedentary: χ² = %.2f, p = %.2e\n", kw_sedentary$statistic, kw_sedentary$p.value))
 cat(sprintf("  Activity calories: χ² = %.2f, p = %.2e\n\n", kw_activity_cal$statistic, kw_activity_cal$p.value))
 
+# Create formatted summary table
+cat("Creating formatted tables...\n")
+
+summary_table_formatted <- summary_by_bmi %>%
+  mutate(
+    BMI = sprintf("%.1f ± %.1f", BMI_mean, BMI_sd),
+    Steps = sprintf("%.0f (%.0f-%.0f)", Steps_median, Steps_q25, Steps_q75),
+    Sedentary = sprintf("%.0f (%.0f-%.0f)", Sedentary_median, Sedentary_q25, Sedentary_q75),
+    `Light Active` = sprintf("%.0f (%.0f-%.0f)", LightActive_median, LightActive_q25, LightActive_q75),
+    `Fairly Active` = sprintf("%.0f (%.0f-%.0f)", FairlyActive_median, FairlyActive_q25, FairlyActive_q75),
+    `Very Active` = sprintf("%.0f (%.0f-%.0f)", VeryActive_median, VeryActive_q25, VeryActive_q75),
+    `Activity Calories` = sprintf("%.0f (%.0f-%.0f)", ActivityCal_median, ActivityCal_q25, ActivityCal_q75)
+  ) %>%
+  select(`BMI Class` = bmi_class, N, BMI, Steps, Sedentary,
+         `Light Active`, `Fairly Active`, `Very Active`, `Activity Calories`)
+
+# Save as HTML table
+html_table <- knitr::kable(summary_table_formatted,
+                           format = "html",
+                           caption = "Activity Measures by BMI Class (Median and IQR)",
+                           align = c("l", "r", "r", "r", "r", "r", "r", "r", "r"))
+
+writeLines(html_table, "analysis1_summary_table.html")
+cat("✓ Saved: analysis1_summary_table.html\n")
+
+# Save statistical test results
+stat_results <- data.frame(
+  Measure = c("Steps", "Sedentary Minutes", "Activity Calories"),
+  Chi_squared = c(kw_steps$statistic, kw_sedentary$statistic, kw_activity_cal$statistic),
+  p_value = c(kw_steps$p.value, kw_sedentary$p.value, kw_activity_cal$p.value)
+) %>%
+  mutate(
+    Significance = case_when(
+      p_value < 0.001 ~ "***",
+      p_value < 0.01 ~ "**",
+      p_value < 0.05 ~ "*",
+      TRUE ~ "ns"
+    )
+  )
+
+write_csv(stat_results, "analysis1_statistical_tests.csv")
+cat("✓ Saved: analysis1_statistical_tests.csv\n\n")
+
+# Create visualizations
+cat("Creating visualizations...\n")
+
+# Violin plot for steps by BMI class
+p1_steps <- ggplot(analysis1_data, aes(x = bmi_class, y = avg_steps, fill = bmi_class)) +
+  geom_violin(alpha = 0.7, draw_quantiles = c(0.25, 0.5, 0.75)) +
+  geom_boxplot(width = 0.2, alpha = 0.3, outlier.alpha = 0.3) +
+  scale_fill_brewer(palette = "RdYlBu", direction = -1) +
+  scale_y_continuous(labels = scales::comma) +
+  labs(
+    title = "Daily Steps by BMI Class",
+    subtitle = sprintf("Kruskal-Wallis χ² = %.2f, p = %.2e", kw_steps$statistic, kw_steps$p.value),
+    x = "BMI Class",
+    y = "Average Daily Steps"
+  ) +
+  theme_minimal(base_size = 12) +
+  theme(
+    legend.position = "none",
+    panel.grid.minor = element_blank()
+  )
+
+# Violin plot for sedentary minutes
+p2_sedentary <- ggplot(analysis1_data, aes(x = bmi_class, y = avg_sedentary_min, fill = bmi_class)) +
+  geom_violin(alpha = 0.7, draw_quantiles = c(0.25, 0.5, 0.75)) +
+  geom_boxplot(width = 0.2, alpha = 0.3, outlier.alpha = 0.3) +
+  scale_fill_brewer(palette = "RdYlBu", direction = -1) +
+  labs(
+    title = "Sedentary Minutes by BMI Class",
+    subtitle = sprintf("Kruskal-Wallis χ² = %.2f, p = %.2e", kw_sedentary$statistic, kw_sedentary$p.value),
+    x = "BMI Class",
+    y = "Average Sedentary Minutes/Day"
+  ) +
+  theme_minimal(base_size = 12) +
+  theme(
+    legend.position = "none",
+    panel.grid.minor = element_blank()
+  )
+
+# Violin plot for activity calories
+p3_calories <- ggplot(analysis1_data, aes(x = bmi_class, y = avg_activity_calories, fill = bmi_class)) +
+  geom_violin(alpha = 0.7, draw_quantiles = c(0.25, 0.5, 0.75)) +
+  geom_boxplot(width = 0.2, alpha = 0.3, outlier.alpha = 0.3) +
+  scale_fill_brewer(palette = "RdYlBu", direction = -1) +
+  scale_y_continuous(labels = scales::comma) +
+  labs(
+    title = "Activity Calories by BMI Class",
+    subtitle = sprintf("Kruskal-Wallis χ² = %.2f, p = %.2e", kw_activity_cal$statistic, kw_activity_cal$p.value),
+    x = "BMI Class",
+    y = "Average Activity Calories/Day"
+  ) +
+  theme_minimal(base_size = 12) +
+  theme(
+    legend.position = "none",
+    panel.grid.minor = element_blank()
+  )
+
+# Stacked bar plot for activity intensity breakdown
+activity_intensity <- analysis1_data %>%
+  group_by(bmi_class) %>%
+  summarize(
+    Sedentary = median(avg_sedentary_min, na.rm = TRUE),
+    `Light Active` = median(avg_lightly_active_min, na.rm = TRUE),
+    `Fairly Active` = median(avg_fairly_active_min, na.rm = TRUE),
+    `Very Active` = median(avg_very_active_min, na.rm = TRUE),
+    .groups = "drop"
+  ) %>%
+  pivot_longer(cols = -bmi_class, names_to = "Intensity", values_to = "Minutes") %>%
+  mutate(
+    Intensity = factor(Intensity, levels = c("Very Active", "Fairly Active", "Light Active", "Sedentary"))
+  )
+
+p4_intensity <- ggplot(activity_intensity, aes(x = bmi_class, y = Minutes, fill = Intensity)) +
+  geom_bar(stat = "identity", position = "stack") +
+  scale_fill_manual(values = c("Very Active" = "#2166ac",
+                               "Fairly Active" = "#4393c3",
+                               "Light Active" = "#92c5de",
+                               "Sedentary" = "#d1e5f0")) +
+  labs(
+    title = "Activity Intensity Breakdown by BMI Class",
+    subtitle = "Median minutes per day",
+    x = "BMI Class",
+    y = "Minutes per Day",
+    fill = "Intensity"
+  ) +
+  theme_minimal(base_size = 12) +
+  theme(
+    panel.grid.minor = element_blank(),
+    legend.position = "bottom"
+  )
+
+# Combine plots
+p_combined <- (p1_steps | p2_sedentary) / (p3_calories | p4_intensity) +
+  plot_annotation(
+    title = "Fitbit Activity Measures by BMI Class",
+    subtitle = sprintf("N = %d participants with >30 days of Fitbit data", nrow(analysis1_data)),
+    theme = theme(plot.title = element_text(size = 16, face = "bold"))
+  )
+
+ggsave("analysis1_activity_by_bmi_combined.png", p_combined,
+       width = 14, height = 10, dpi = 300, bg = "white")
+ggsave("analysis1_activity_by_bmi_combined.pdf", p_combined,
+       width = 14, height = 10)
+
+cat("✓ Saved: analysis1_activity_by_bmi_combined.png\n")
+cat("✓ Saved: analysis1_activity_by_bmi_combined.pdf\n\n")
+
 # =============================================================================
 # ANALYSIS 2: BMI CLASS TRANSITIONS
 # =============================================================================
@@ -534,7 +685,54 @@ if (nrow(transitioners) == 0) {
 
     # Save outputs
     write_csv(transitioner_summary, "analysis2_bmi_transitioners.csv")
-    cat("✓ Saved: analysis2_bmi_transitioners.csv\n\n")
+    cat("✓ Saved: analysis2_bmi_transitioners.csv\n")
+
+    # Create formatted summary table
+    summary_table_formatted_a2 <- overall_summary %>%
+      mutate(
+        `Baseline Steps` = sprintf("%.0f (%.0f-%.0f)", Baseline_steps_median, Baseline_steps_q25, Baseline_steps_q75),
+        `Follow-up Steps` = sprintf("%.0f (%.0f-%.0f)", Followup_steps_median, Followup_steps_q25, Followup_steps_q75),
+        `Delta Steps` = sprintf("%.0f", Delta_steps_median)
+      ) %>%
+      select(N, `Baseline Steps`, `Follow-up Steps`, `Delta Steps`)
+
+    html_table_a2 <- knitr::kable(summary_table_formatted_a2,
+                                  format = "html",
+                                  caption = "Activity in Participants Who Transitioned to Lower BMI Class (Median and IQR)",
+                                  align = c("r", "r", "r", "r"))
+
+    writeLines(html_table_a2, "analysis2_summary_table.html")
+    cat("✓ Saved: analysis2_summary_table.html\n")
+
+    # Create additional visualization: paired comparison
+    transitioner_long <- transitioner_summary %>%
+      select(person_id, Baseline = avg_steps_baseline, `Follow-up` = avg_steps_followup) %>%
+      pivot_longer(cols = c(Baseline, `Follow-up`), names_to = "Period", values_to = "Steps") %>%
+      mutate(Period = factor(Period, levels = c("Baseline", "Follow-up")))
+
+    p_paired <- ggplot(transitioner_long, aes(x = Period, y = Steps)) +
+      geom_line(aes(group = person_id), alpha = 0.2, color = "gray60") +
+      geom_violin(alpha = 0.6, fill = "#4575b4", draw_quantiles = c(0.25, 0.5, 0.75)) +
+      geom_boxplot(width = 0.2, alpha = 0.3, outlier.alpha = 0.5) +
+      scale_y_continuous(labels = scales::comma) +
+      labs(
+        title = "Step Changes in Participants Who Reduced BMI Class",
+        subtitle = sprintf("N = %d participants with >30d between measurements, ≥5d Fitbit in each window",
+                          nrow(transitioner_summary)),
+        x = "Period",
+        y = "Average Daily Steps"
+      ) +
+      theme_minimal(base_size = 12) +
+      theme(
+        panel.grid.minor = element_blank()
+      )
+
+    ggsave("analysis2_paired_steps_comparison.png", p_paired,
+           width = 8, height = 6, dpi = 300, bg = "white")
+    ggsave("analysis2_paired_steps_comparison.pdf", p_paired,
+           width = 8, height = 6)
+
+    cat("✓ Saved: analysis2_paired_steps_comparison.png/pdf\n\n")
 
     # Sankey diagram by step quartiles
     cat("Creating Sankey diagram for step quartile transitions...\n\n")
@@ -609,14 +807,25 @@ cat("##################################################\n\n")
 
 cat("Output files:\n")
 cat("  Analysis 1 (BMI stratification):\n")
-cat("    - analysis1_individual_data.csv\n")
-cat("    - analysis1_summary_by_bmi.csv\n\n")
+cat("    CSV files:\n")
+cat("      - analysis1_individual_data.csv\n")
+cat("      - analysis1_summary_by_bmi.csv\n")
+cat("      - analysis1_statistical_tests.csv\n")
+cat("    Tables:\n")
+cat("      - analysis1_summary_table.html\n")
+cat("    Figures:\n")
+cat("      - analysis1_activity_by_bmi_combined.png/pdf (4-panel visualization)\n\n")
 
 if (exists("transitioner_summary") && nrow(transitioner_summary) > 0) {
   cat("  Analysis 2 (BMI class transitions):\n")
-  cat("    - analysis2_bmi_transitioners.csv\n")
-  cat("    - analysis2_step_quartile_transitions.csv\n")
-  cat("    - analysis2_step_quartile_sankey.png/pdf\n\n")
+  cat("    CSV files:\n")
+  cat("      - analysis2_bmi_transitioners.csv\n")
+  cat("      - analysis2_step_quartile_transitions.csv\n")
+  cat("    Tables:\n")
+  cat("      - analysis2_summary_table.html\n")
+  cat("    Figures:\n")
+  cat("      - analysis2_paired_steps_comparison.png/pdf\n")
+  cat("      - analysis2_step_quartile_sankey.png/pdf\n\n")
 }
 
 cat("Done!\n\n")
