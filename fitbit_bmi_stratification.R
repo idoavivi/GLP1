@@ -421,6 +421,78 @@ cat(sprintf("  Steps: χ² = %.2f, p = %.2e\n", kw_steps$statistic, kw_steps$p.v
 cat(sprintf("  Sedentary: χ² = %.2f, p = %.2e\n", kw_sedentary$statistic, kw_sedentary$p.value))
 cat(sprintf("  Activity calories: χ² = %.2f, p = %.2e\n\n", kw_activity_cal$statistic, kw_activity_cal$p.value))
 
+# Pairwise comparisons (post-hoc tests)
+cat("Running pairwise comparisons (Wilcoxon with Bonferroni correction)...\n")
+
+# Steps - pairwise comparisons
+pairwise_steps <- pairwise.wilcox.test(analysis1_data$avg_steps,
+                                        analysis1_data$bmi_class,
+                                        p.adjust.method = "bonferroni")
+
+# Sedentary - pairwise comparisons
+pairwise_sedentary <- pairwise.wilcox.test(analysis1_data$avg_sedentary_min,
+                                            analysis1_data$bmi_class,
+                                            p.adjust.method = "bonferroni")
+
+# Activity calories - pairwise comparisons
+pairwise_calories <- pairwise.wilcox.test(analysis1_data$avg_activity_calories,
+                                           analysis1_data$bmi_class,
+                                           p.adjust.method = "bonferroni")
+
+# Format pairwise results as tables
+format_pairwise <- function(pw_test, measure_name) {
+  p_matrix <- pw_test$p.value
+
+  # Convert matrix to long format
+  results <- data.frame()
+  for (i in 2:nrow(p_matrix)) {
+    for (j in 1:(i-1)) {
+      if (!is.na(p_matrix[i, j])) {
+        sig <- case_when(
+          p_matrix[i, j] < 0.001 ~ "***",
+          p_matrix[i, j] < 0.01 ~ "**",
+          p_matrix[i, j] < 0.05 ~ "*",
+          TRUE ~ "ns"
+        )
+        results <- rbind(results, data.frame(
+          Measure = measure_name,
+          Group1 = rownames(p_matrix)[i],
+          Group2 = colnames(p_matrix)[j],
+          p_value = p_matrix[i, j],
+          Significance = sig
+        ))
+      }
+    }
+  }
+  return(results)
+}
+
+pairwise_results_steps <- format_pairwise(pairwise_steps, "Steps")
+pairwise_results_sedentary <- format_pairwise(pairwise_sedentary, "Sedentary Minutes")
+pairwise_results_calories <- format_pairwise(pairwise_calories, "Activity Calories")
+
+# Combine all pairwise results
+all_pairwise <- rbind(pairwise_results_steps, pairwise_results_sedentary, pairwise_results_calories)
+
+# Save pairwise comparison results
+write_csv(all_pairwise, "analysis1_pairwise_comparisons.csv")
+cat("✓ Saved: analysis1_pairwise_comparisons.csv\n")
+
+# Count significant comparisons for each measure
+sig_counts <- all_pairwise %>%
+  filter(Significance != "ns") %>%
+  group_by(Measure) %>%
+  summarize(n_significant = n(), .groups = "drop")
+
+cat("\nSignificant pairwise differences (p < 0.05, Bonferroni-corrected):\n")
+for (i in 1:nrow(sig_counts)) {
+  cat(sprintf("  %s: %d of %d comparisons\n",
+              sig_counts$Measure[i],
+              sig_counts$n_significant[i],
+              nrow(pairwise_results_steps)))
+}
+cat("\n")
+
 # Create formatted summary table
 cat("Creating formatted tables...\n")
 
@@ -870,7 +942,8 @@ cat("  Analysis 1 (BMI stratification):\n")
 cat("    CSV files:\n")
 cat("      - analysis1_individual_data.csv\n")
 cat("      - analysis1_summary_by_bmi.csv\n")
-cat("      - analysis1_statistical_tests.csv\n")
+cat("      - analysis1_statistical_tests.csv (Kruskal-Wallis overall tests)\n")
+cat("      - analysis1_pairwise_comparisons.csv (post-hoc pairwise tests)\n")
 cat("    Tables:\n")
 cat("      - analysis1_summary_table.html\n")
 cat("    Figures:\n")
