@@ -64,9 +64,10 @@ if (exists("dataset_50785095_fitbit_activity_df") && is.data.frame(dataset_50785
     )
   ")
 
-  activity_raw <- bq_table_download(bq_project_query(Sys.getenv('GOOGLE_PROJECT'),
-                                                       activity_sql,
-                                                       billing = Sys.getenv('GOOGLE_PROJECT')))
+  activity_raw <- bq_table_download(
+    bq_dataset_query(Sys.getenv("WORKSPACE_CDR"), activity_sql,
+                     billing = Sys.getenv("GOOGLE_PROJECT"))
+  )
 }
 
 cat(sprintf("Loaded: %d activity records from %d participants\n\n",
@@ -127,9 +128,10 @@ if (exists("dataset_50785095_measurement_df") && is.data.frame(dataset_50785095_
       )
   ")
 
-  weight_raw <- bq_table_download(bq_project_query(Sys.getenv('GOOGLE_PROJECT'),
-                                                     weight_sql,
-                                                     billing = Sys.getenv('GOOGLE_PROJECT')))
+  weight_raw <- bq_table_download(
+    bq_dataset_query(Sys.getenv("WORKSPACE_CDR"), weight_sql,
+                     billing = Sys.getenv("GOOGLE_PROJECT"))
+  )
 
   # Height
   height_sql <- paste("
@@ -147,9 +149,10 @@ if (exists("dataset_50785095_measurement_df") && is.data.frame(dataset_50785095_
       )
   ")
 
-  height_raw <- bq_table_download(bq_project_query(Sys.getenv('GOOGLE_PROJECT'),
-                                                     height_sql,
-                                                     billing = Sys.getenv('GOOGLE_PROJECT')))
+  height_raw <- bq_table_download(
+    bq_dataset_query(Sys.getenv("WORKSPACE_CDR"), height_sql,
+                     billing = Sys.getenv("GOOGLE_PROJECT"))
+  )
 }
 
 cat(sprintf("Weight: %d records from %d participants\n",
