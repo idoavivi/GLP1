@@ -1,8 +1,9 @@
 # =============================================================================
-# BMI TRANSITIONS WITH MEDICATION EXCLUSION (OPTIMIZED)
+# WEIGHT LOSS ANALYSIS WITH MEDICATION EXCLUSION (OPTIMIZED)
 # =============================================================================
-# Analyzes participants who lost weight and transitioned to lower BMI class
+# Analyzes participants who achieved ≥5% weight loss
 # - Compares HIGHEST weight (baseline) to LOWEST weight (nadir)
+# - Requires ≥5% weight loss (clinically significant)
 # - Requires ≥30 days between measurements
 # - Excludes weight loss >30% (extreme/unrealistic loss)
 # - Excludes GLP-1 medications (semaglutide, tirzepatide)
@@ -14,8 +15,8 @@ library(ggalluvial)
 library(knitr)
 
 cat("\n##################################################\n")
-cat("BMI TRANSITIONS (GLP-1 MEDICATION EXCLUSION)\n")
-cat("Activity in 90-day windows before baseline & nadir\n")
+cat("WEIGHT LOSS ANALYSIS (GLP-1 MEDICATION EXCLUSION)\n")
+cat("≥5% weight loss - Activity before highest & lowest weights\n")
 cat("##################################################\n\n")
 
 # =============================================================================
@@ -222,11 +223,11 @@ cat(sprintf("After exclusion: %s BMI records from %s participants\n\n",
             format(length(unique(bmi_final_no_glp1$person_id)), big.mark = ",")))
 
 # =============================================================================
-# STEP 4: IDENTIFY BMI TRANSITIONS WITH NADIR
+# STEP 4: IDENTIFY WEIGHT LOSS PARTICIPANTS
 # =============================================================================
 
 cat("========================================\n")
-cat("STEP 4: Identifying BMI transitions\n")
+cat("STEP 4: Identifying weight loss participants\n")
 cat("========================================\n\n")
 
 cat("Assigning BMI classes...\n")
@@ -254,7 +255,7 @@ bmi_with_class <- bmi_final_no_glp1 %>%
 cat("Finding baseline (highest weight) and nadir (lowest weight)...\n")
 
 # Find baseline (HIGHEST weight) and nadir (lowest weight) for each participant
-bmi_transitions <- bmi_with_class %>%
+weight_loss_participants <- bmi_with_class %>%
   group_by(person_id) %>%
   arrange(measurement_date) %>%
   summarize(
@@ -282,26 +283,32 @@ bmi_transitions <- bmi_with_class %>%
     delta_weight = nadir_weight - baseline_weight,
     pct_weight_loss = 100 * (baseline_weight - nadir_weight) / baseline_weight,
 
-    # Class change
+    # BMI class change (tracked for descriptive purposes)
     class_change = nadir_class_num - baseline_class_num,
+    moved_to_lower_bmi_class = class_change < 0,
 
-    # Criteria for inclusion
-    moved_to_lower_class = class_change < 0 &  # Moved to lower BMI class
-                          days_baseline_to_nadir >= 30 &  # Nadir at least 30 days AFTER baseline
-                          pct_weight_loss > 0 &  # Actually lost weight (highest before lowest)
-                          pct_weight_loss <= 30  # Exclude extreme weight loss (>30%)
+    # Criteria for inclusion: ≥5% weight loss
+    significant_weight_loss = days_baseline_to_nadir >= 30 &  # Nadir at least 30 days AFTER baseline
+                              pct_weight_loss >= 5 &  # Clinically significant weight loss (≥5%)
+                              pct_weight_loss <= 30  # Exclude extreme weight loss (>30%)
   )
 
-# Filter for participants who moved to lower BMI class
-transitioners <- bmi_transitions %>%
-  filter(moved_to_lower_class == TRUE)
+# Filter for participants with ≥5% weight loss
+weight_losers <- weight_loss_participants %>%
+  filter(significant_weight_loss == TRUE)
 
-cat(sprintf("Found %s participants who transitioned to lower BMI class\n",
-            format(nrow(transitioners), big.mark = ",")))
-cat(sprintf("  Criteria: highest→lowest weight ≥30 days apart, lost weight but ≤30%%, no GLP-1\n\n"))
+cat(sprintf("Found %s participants with ≥5%% weight loss\n",
+            format(nrow(weight_losers), big.mark = ",")))
+cat(sprintf("  Criteria: highest→lowest weight ≥30 days apart, 5-30%% loss, no GLP-1\n"))
 
-if (nrow(transitioners) == 0) {
-  cat("⚠ No participants found with BMI class transitions. Analysis complete.\n\n")
+# Show how many also changed BMI class
+n_bmi_class_change <- sum(weight_losers$moved_to_lower_bmi_class, na.rm = TRUE)
+cat(sprintf("  Of these, %s (%.1f%%) also moved to lower BMI class\n\n",
+            format(n_bmi_class_change, big.mark = ","),
+            100 * n_bmi_class_change / nrow(weight_losers)))
+
+if (nrow(weight_losers) == 0) {
+  cat("⚠ No participants found with ≥5% weight loss. Analysis complete.\n\n")
   quit(save = "no", status = 0)
 }
 
@@ -316,7 +323,7 @@ cat("========================================\n\n")
 cat("Creating 90-day windows BEFORE baseline and nadir weights...\n")
 
 # Create time windows (90 days BEFORE each weight measurement)
-transitioners_windows <- transitioners %>%
+weight_losers_windows <- weight_losers %>%
   mutate(
     baseline_window_start = baseline_date - 90,
     baseline_window_end = baseline_date - 1,  # Day before baseline
@@ -329,7 +336,7 @@ cat("Extracting baseline activity (90 days before baseline)...\n")
 # Extract baseline activity
 baseline_activity <- activity_final_no_glp1 %>%
   inner_join(
-    transitioners_windows %>%
+    weight_losers_windows %>%
       select(person_id, baseline_window_start, baseline_window_end),
     by = "person_id"
   ) %>%
@@ -351,7 +358,7 @@ cat("Extracting nadir activity (90 days before nadir)...\n")
 # Extract nadir activity
 nadir_activity <- activity_final_no_glp1 %>%
   inner_join(
-    transitioners_windows %>%
+    weight_losers_windows %>%
       select(person_id, nadir_window_start, nadir_window_end),
     by = "person_id"
   ) %>%
@@ -368,10 +375,10 @@ nadir_activity <- activity_final_no_glp1 %>%
     .groups = "drop"
   )
 
-cat("Merging activity with transitions...\n")
+cat("Merging activity with weight loss data...\n")
 
-# Merge activity data with transition data
-transitioner_summary <- transitioners %>%
+# Merge activity data with weight loss data
+weight_loser_summary <- weight_losers %>%
   left_join(baseline_activity, by = "person_id") %>%
   left_join(nadir_activity, by = "person_id") %>%
   # Filter for ≥5 days at both timepoints (out of 90-day windows)
@@ -383,12 +390,12 @@ transitioner_summary <- transitioners %>%
     # Calculate step changes
     delta_steps = avg_steps_nadir - avg_steps_baseline,
     pct_change_steps = 100 * delta_steps / avg_steps_baseline
-    # Note: delta_weight and pct_weight_loss already calculated in bmi_transitions
+    # Note: delta_weight and pct_weight_loss already calculated in weight_loss_participants
   ) %>%
   select(person_id,
          baseline_date, baseline_bmi, baseline_weight, baseline_class,
          nadir_date, nadir_bmi, nadir_weight, nadir_class,
-         days_baseline_to_nadir, delta_weight, pct_weight_loss,
+         days_baseline_to_nadir, delta_weight, pct_weight_loss, moved_to_lower_bmi_class,
          n_baseline_days, n_nadir_days,
          avg_steps_baseline, avg_steps_nadir, delta_steps, pct_change_steps,
          avg_sedentary_baseline, avg_sedentary_nadir,
@@ -398,9 +405,9 @@ transitioner_summary <- transitioners %>%
          avg_activity_cal_baseline, avg_activity_cal_nadir)
 
 cat(sprintf("After requiring ≥5 days Fitbit data: %s participants\n\n",
-            format(nrow(transitioner_summary), big.mark = ",")))
+            format(nrow(weight_loser_summary), big.mark = ",")))
 
-if (nrow(transitioner_summary) == 0) {
+if (nrow(weight_loser_summary) == 0) {
   cat("⚠ No participants with sufficient Fitbit data. Analysis complete.\n\n")
   quit(save = "no", status = 0)
 }
@@ -414,11 +421,11 @@ cat("STEP 6: Calculating step quartiles\n")
 cat("========================================\n\n")
 
 # Pre-calculate quartile cutoffs
-baseline_quartiles <- quantile(transitioner_summary$avg_steps_baseline,
+baseline_quartiles <- quantile(weight_loser_summary$avg_steps_baseline,
                                 probs = c(0.25, 0.50, 0.75),
                                 na.rm = TRUE)
 
-nadir_quartiles <- quantile(transitioner_summary$avg_steps_nadir,
+nadir_quartiles <- quantile(weight_loser_summary$avg_steps_nadir,
                             probs = c(0.25, 0.50, 0.75),
                             na.rm = TRUE)
 
@@ -437,7 +444,7 @@ cat(sprintf("  Q1: ≤%.0f, Q2: %.0f-%.0f, Q3: %.0f-%.0f, Q4: >%.0f\n\n",
             nadir_quartiles[3]))
 
 # Assign quartiles
-transitioner_summary <- transitioner_summary %>%
+weight_loser_summary <- weight_loser_summary %>%
   mutate(
     steps_quartile_baseline = case_when(
       avg_steps_baseline <= baseline_quartiles[1] ~ "Q1",
@@ -462,7 +469,7 @@ cat("STEP 7: Computing summary statistics\n")
 cat("========================================\n\n")
 
 # Overall summary
-overall_summary <- transitioner_summary %>%
+overall_summary <- weight_loser_summary %>%
   summarize(
     N = n(),
 
@@ -487,15 +494,15 @@ overall_summary <- transitioner_summary %>%
     Delta_steps_q75 = quantile(delta_steps, 0.75, na.rm = TRUE)
   )
 
-cat("Activity in Participants with BMI Class Reduction:\n")
+cat("Activity in Participants with ≥5% Weight Loss:\n")
 cat("(Excluding GLP-1 injectable users)\n")
 cat("=================================================\n\n")
 print(overall_summary)
 cat("\n")
 
 # Statistical tests
-wilcox_steps <- wilcox.test(transitioner_summary$avg_steps_baseline,
-                            transitioner_summary$avg_steps_nadir,
+wilcox_steps <- wilcox.test(weight_loser_summary$avg_steps_baseline,
+                            weight_loser_summary$avg_steps_nadir,
                             paired = TRUE)
 
 cat(sprintf("Paired Wilcoxon test (steps): p = %.2e\n", wilcox_steps$p.value))
@@ -506,8 +513,8 @@ if (wilcox_steps$p.value < 0.05) {
 }
 
 # Correlation between step change and weight loss
-cor_test <- cor.test(transitioner_summary$delta_steps,
-                    transitioner_summary$pct_weight_loss,
+cor_test <- cor.test(weight_loser_summary$delta_steps,
+                    weight_loser_summary$pct_weight_loss,
                     method = "spearman")
 
 cat(sprintf("Correlation (Δ steps vs %% weight loss): rho = %.3f, p = %.2e\n\n",
@@ -522,11 +529,11 @@ cat("STEP 8: Saving outputs\n")
 cat("========================================\n\n")
 
 # Save individual data
-write_csv(transitioner_summary, "analysis2_glp1_excluded_transitioners.csv")
-cat("✓ Saved: analysis2_glp1_excluded_transitioners.csv\n")
+write_csv(weight_loser_summary, "analysis2_glp1_excluded_weight_losers.csv")
+cat("✓ Saved: analysis2_glp1_excluded_weight_losers.csv\n")
 
 # Save transition counts
-transition_counts <- transitioner_summary %>%
+transition_counts <- weight_loser_summary %>%
   group_by(steps_quartile_baseline, steps_quartile_nadir) %>%
   summarize(n = n(), .groups = "drop") %>%
   arrange(steps_quartile_baseline, steps_quartile_nadir)
@@ -550,7 +557,7 @@ summary_table_formatted <- overall_summary %>%
 
 html_table <- knitr::kable(summary_table_formatted,
                            format = "html",
-                           caption = "Activity in Participants Who Transitioned to Lower BMI Class (GLP-1 Excluded)",
+                           caption = "Activity in Participants with ≥5% Weight Loss (GLP-1 Excluded)",
                            align = c("r", "r", "r", "r", "r"))
 
 writeLines(html_table, "analysis2_glp1_excluded_summary_table.html")
@@ -567,20 +574,20 @@ cat("========================================\n\n")
 # Paired comparison plot
 cat("Creating paired comparison plot...\n")
 
-transitioner_long <- transitioner_summary %>%
+weight_loser_long <- weight_loser_summary %>%
   select(person_id, Baseline = avg_steps_baseline, Nadir = avg_steps_nadir) %>%
   pivot_longer(cols = c(Baseline, Nadir), names_to = "Period", values_to = "Steps") %>%
   mutate(Period = factor(Period, levels = c("Baseline", "Nadir")))
 
-p_paired <- ggplot(transitioner_long, aes(x = Period, y = Steps)) +
+p_paired <- ggplot(weight_loser_long, aes(x = Period, y = Steps)) +
   geom_line(aes(group = person_id), alpha = 0.2, color = "gray60") +
   geom_violin(alpha = 0.6, fill = "#4575b4", draw_quantiles = c(0.25, 0.5, 0.75)) +
   geom_boxplot(width = 0.2, alpha = 0.3, outlier.alpha = 0.5) +
   scale_y_continuous(labels = scales::comma) +
   labs(
-    title = "Step Changes in BMI Class Reducers (GLP-1 Excluded)",
+    title = "Step Changes in Participants with ≥5% Weight Loss (GLP-1 Excluded)",
     subtitle = sprintf("N = %s, paired Wilcoxon p = %.2e",
-                      format(nrow(transitioner_summary), big.mark = ","),
+                      format(nrow(weight_loser_summary), big.mark = ","),
                       wilcox_steps$p.value),
     x = "Period",
     y = "Average Daily Steps (90-day window)"
@@ -598,14 +605,14 @@ cat("✓ Saved: analysis2_glp1_excluded_paired_steps.png/pdf\n")
 # Scatter plot: Delta steps vs weight loss
 cat("Creating scatter plot...\n")
 
-p_scatter <- ggplot(transitioner_summary, aes(x = delta_steps, y = pct_weight_loss)) +
+p_scatter <- ggplot(weight_loser_summary, aes(x = delta_steps, y = pct_weight_loss)) +
   geom_point(alpha = 0.4, color = "#4575b4") +
   geom_smooth(method = "lm", color = "#d73027", se = TRUE) +
   geom_hline(yintercept = 0, linetype = "dashed", color = "gray50") +
   geom_vline(xintercept = 0, linetype = "dashed", color = "gray50") +
   labs(
-    title = "Step Change vs Weight Loss in BMI Class Reducers",
-    subtitle = sprintf("Spearman rho = %.3f, p = %.2e (GLP-1 excluded)",
+    title = "Step Change vs Weight Loss (≥5% Loss, GLP-1 Excluded)",
+    subtitle = sprintf("Spearman rho = %.3f, p = %.2e",
                       cor_test$estimate, cor_test$p.value),
     x = "Change in Steps (Nadir - Baseline)",
     y = "Weight Loss (%)"
@@ -623,8 +630,8 @@ cat("✓ Saved: analysis2_glp1_excluded_scatter.png/pdf\n")
 # Sankey diagram
 cat("Creating Sankey diagram...\n")
 
-if (nrow(transitioner_summary) >= 10) {
-  sankey_data <- transitioner_summary %>%
+if (nrow(weight_loser_summary) >= 10) {
+  sankey_data <- weight_loser_summary %>%
     select(person_id,
            Baseline = steps_quartile_baseline,
            Nadir = steps_quartile_nadir) %>%
@@ -646,9 +653,9 @@ if (nrow(transitioner_summary) >= 10) {
     scale_fill_manual(values = c("Q1" = "#d73027", "Q2" = "#fc8d59",
                                  "Q3" = "#91bfdb", "Q4" = "#4575b4")) +
     scale_x_discrete(limits = c("Baseline", "Nadir"),
-                    labels = c("Baseline\n(Higher BMI)", "Nadir\n(Lower BMI)")) +
+                    labels = c("Baseline\n(Highest Weight)", "Nadir\n(Lowest Weight)")) +
     labs(
-      title = "Step Quartile Transitions in BMI Class Reducers",
+      title = "Step Quartile Transitions in ≥5% Weight Loss Participants",
       subtitle = sprintf("N = %s (GLP-1 excluded)",
                         format(nrow(sankey_data), big.mark = ",")),
       y = "Number of Participants"
@@ -681,14 +688,14 @@ cat("##################################################\n\n")
 
 cat("Output files:\n")
 cat("  CSV files:\n")
-cat("    - analysis2_glp1_excluded_transitioners.csv\n")
+cat("    - analysis2_glp1_excluded_weight_losers.csv\n")
 cat("    - analysis2_glp1_excluded_step_quartile_transitions.csv\n")
 cat("  Tables:\n")
 cat("    - analysis2_glp1_excluded_summary_table.html\n")
 cat("  Figures:\n")
 cat("    - analysis2_glp1_excluded_paired_steps.png/pdf\n")
 cat("    - analysis2_glp1_excluded_scatter.png/pdf\n")
-if (nrow(transitioner_summary) >= 10) {
+if (nrow(weight_loser_summary) >= 10) {
   cat("    - analysis2_glp1_excluded_sankey.png/pdf\n")
 }
 cat("\nDone!\n\n")
