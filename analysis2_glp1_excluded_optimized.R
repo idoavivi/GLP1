@@ -29,6 +29,7 @@ drug_vars <- ls(pattern = "drug", envir = .GlobalEnv)
 cat(sprintf("Found %d drug-related objects in memory: %s\n",
             length(drug_vars), paste(drug_vars, collapse = ", ")))
 
+# Option 1: Check for pre-loaded dataframes in memory
 if (exists("dataset_98104042_drug_df") && is.data.frame(dataset_98104042_drug_df)) {
   cat("✓ Using pre-loaded drug exposure data (dataset_98104042_drug_df)\n")
   drug_raw <- dataset_98104042_drug_df
@@ -39,17 +40,76 @@ if (exists("dataset_98104042_drug_df") && is.data.frame(dataset_98104042_drug_df
   cat("✓ Using pre-loaded drug exposure data (dataset_50785095_drug_exposure_df)\n")
   drug_raw <- dataset_50785095_drug_exposure_df
 } else {
-  stop(paste(
-    "\n❌ ERROR: No pre-loaded drug exposure data found.\n\n",
-    "Please run the system-generated data export code first to load drug_df.\n",
-    "The drug exposure table is too large (~9 million rows) to download directly.\n\n",
-    "Expected variable names:\n",
-    "  - dataset_98104042_drug_df\n",
-    "  - dataset_23119529_drug_df\n",
-    "  - dataset_50785095_drug_exposure_df\n\n",
-    "Found in memory: ", paste(drug_vars, collapse = ", "), "\n\n",
-    "If you have drug data with a different name, please rename it to one of the above.\n"
-  ))
+  # Option 2: Check for CSV exports in workspace bucket
+  cat("No pre-loaded dataframe found. Checking for CSV exports...\n")
+
+  # Check for CSV exports in workspace bucket
+  workspace_bucket <- Sys.getenv("WORKSPACE_BUCKET")
+  owner_email <- Sys.getenv("OWNER_EMAIL")
+
+  if (workspace_bucket != "" && owner_email != "") {
+    # Look for drug CSV exports (checking multiple date folders)
+    bq_exports_base <- file.path(workspace_bucket, "bq_exports", owner_email)
+
+    if (dir.exists(bq_exports_base)) {
+      # Find all date folders, sorted by most recent first
+      date_folders <- list.dirs(bq_exports_base, recursive = FALSE, full.names = TRUE)
+      date_folders <- sort(date_folders, decreasing = TRUE)
+
+      drug_csv_found <- FALSE
+      for (date_folder in date_folders) {
+        # Check for drug_98104042 folder
+        drug_folder <- file.path(date_folder, "drug_98104042")
+        if (dir.exists(drug_folder)) {
+          drug_files <- list.files(drug_folder, pattern = "drug_98104042.*\\.csv$", full.names = TRUE)
+          if (length(drug_files) > 0) {
+            cat(sprintf("✓ Found CSV export: %s\n", drug_folder))
+            cat(sprintf("  Loading %d CSV file(s)...\n", length(drug_files)))
+
+            # Load all CSV files and combine
+            drug_raw <- map_dfr(drug_files, read_csv, show_col_types = FALSE)
+            drug_csv_found <- TRUE
+            break
+          }
+        }
+      }
+
+      if (!drug_csv_found) {
+        stop(paste(
+          "\n❌ ERROR: No drug exposure data found.\n\n",
+          "Option 1: Load data in memory\n",
+          "  Run the system-generated BigQuery code to load drug_df into memory.\n",
+          "  Expected variable names:\n",
+          "    - dataset_98104042_drug_df\n",
+          "    - dataset_23119529_drug_df\n",
+          "    - dataset_50785095_drug_exposure_df\n\n",
+          "Option 2: Export to CSV\n",
+          "  Use the BigQuery export code that writes to:\n",
+          "    ", file.path(workspace_bucket, "bq_exports", owner_email, "{date}/drug_98104042/"), "\n\n",
+          "Found in memory: ", paste(drug_vars, collapse = ", "), "\n"
+        ))
+      }
+    } else {
+      stop(paste(
+        "\n❌ ERROR: No drug exposure data found.\n\n",
+        "Please run the system-generated data export code first.\n",
+        "Expected export location: ", bq_exports_base, "\n\n",
+        "Found in memory: ", paste(drug_vars, collapse = ", "), "\n"
+      ))
+    }
+  } else {
+    stop(paste(
+      "\n❌ ERROR: No pre-loaded drug exposure data found.\n\n",
+      "Please run the system-generated data export code first to load drug_df.\n",
+      "The drug exposure table is too large (~9 million rows) to download directly.\n\n",
+      "Expected variable names:\n",
+      "  - dataset_98104042_drug_df\n",
+      "  - dataset_23119529_drug_df\n",
+      "  - dataset_50785095_drug_exposure_df\n\n",
+      "Found in memory: ", paste(drug_vars, collapse = ", "), "\n\n",
+      "If you have drug data with a different name, please rename it to one of the above.\n"
+    ))
+  }
 }
 
 cat(sprintf("Loaded: %s drug records\n\n", format(nrow(drug_raw), big.mark = ",")))
