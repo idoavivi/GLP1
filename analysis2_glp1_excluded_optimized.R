@@ -40,75 +40,121 @@ if (exists("dataset_98104042_drug_df") && is.data.frame(dataset_98104042_drug_df
   cat("✓ Using pre-loaded drug exposure data (dataset_50785095_drug_exposure_df)\n")
   drug_raw <- dataset_50785095_drug_exposure_df
 } else {
-  # Option 2: Check for CSV exports in workspace bucket
+  # Option 2: Check for CSV exports in workspace bucket (GCS)
   cat("No pre-loaded dataframe found. Checking for CSV exports...\n")
 
-  # Check for CSV exports in workspace bucket
-  workspace_bucket <- Sys.getenv("WORKSPACE_BUCKET")
-  owner_email <- Sys.getenv("OWNER_EMAIL")
+  # First, check if drug_98104042_path variable exists (from export code)
+  if (exists("drug_98104042_path")) {
+    cat(sprintf("Found drug export path: %s\n", drug_98104042_path))
 
-  if (workspace_bucket != "" && owner_email != "") {
-    # Look for drug CSV exports (checking multiple date folders)
-    bq_exports_base <- file.path(workspace_bucket, "bq_exports", owner_email)
+    # Extract the pattern - use gsutil to find matching CSV files
+    gcs_pattern <- drug_98104042_path
 
-    if (dir.exists(bq_exports_base)) {
-      # Find all date folders, sorted by most recent first
-      date_folders <- list.dirs(bq_exports_base, recursive = FALSE, full.names = TRUE)
-      date_folders <- sort(date_folders, decreasing = TRUE)
+    # Use gsutil to find matching CSV files
+    gsutil_cmd <- sprintf("gsutil ls %s 2>/dev/null || true", shQuote(gcs_pattern))
+    gcs_files <- system(gsutil_cmd, intern = TRUE)
 
-      drug_csv_found <- FALSE
-      for (date_folder in date_folders) {
-        # Check for drug_98104042 folder
-        drug_folder <- file.path(date_folder, "drug_98104042")
-        if (dir.exists(drug_folder)) {
-          drug_files <- list.files(drug_folder, pattern = "drug_98104042.*\\.csv$", full.names = TRUE)
-          if (length(drug_files) > 0) {
-            cat(sprintf("✓ Found CSV export: %s\n", drug_folder))
-            cat(sprintf("  Loading %d CSV file(s)...\n", length(drug_files)))
+    if (length(gcs_files) > 0 && !any(grepl("^CommandException|^BucketNotFoundException", gcs_files))) {
+      cat(sprintf("✓ Found %d CSV file(s) in GCS\n", length(gcs_files)))
+      cat("  Loading data from GCS...\n")
 
-            # Load all CSV files and combine
-            drug_raw <- map_dfr(drug_files, read_csv, show_col_types = FALSE)
-            drug_csv_found <- TRUE
-            break
-          }
-        }
+      # Create temp directory for downloading CSVs
+      temp_dir <- tempdir()
+      local_files <- file.path(temp_dir, basename(gcs_files))
+
+      # Download each file
+      for (i in seq_along(gcs_files)) {
+        cat(sprintf("  Downloading file %d/%d...\n", i, length(gcs_files)))
+        system(sprintf("gsutil -q cp %s %s", shQuote(gcs_files[i]), shQuote(local_files[i])))
       }
 
-      if (!drug_csv_found) {
+      # Load and combine all CSV files
+      cat("  Reading CSV files...\n")
+      drug_raw <- map_dfr(local_files, read_csv, show_col_types = FALSE)
+
+      # Clean up temp files
+      file.remove(local_files)
+
+      cat(sprintf("✓ Loaded %s drug records from CSV export\n", format(nrow(drug_raw), big.mark = ",")))
+    } else {
+      # No files found - provide helpful error
+      workspace_bucket <- Sys.getenv("WORKSPACE_BUCKET")
+      owner_email <- Sys.getenv("OWNER_EMAIL")
+
+      stop(paste(
+        "\n❌ ERROR: CSV export not found at expected location.\n\n",
+        "Path checked: ", drug_98104042_path, "\n\n",
+        "Please run the BigQuery EXPORT code (not just define the path).\n",
+        "The export code should look like:\n\n",
+        "  bq extract --destination_format CSV \\\n",
+        "    'project:dataset.drug_exposure' \\\n",
+        "    '", drug_98104042_path, "'\n\n",
+        "Or use the Workbench UI to export the drug_exposure table to this location.\n"
+      ))
+    }
+  } else {
+    # No path variable found - try to search GCS
+    workspace_bucket <- Sys.getenv("WORKSPACE_BUCKET")
+    owner_email <- Sys.getenv("OWNER_EMAIL")
+
+    if (workspace_bucket != "" && owner_email != "") {
+      bq_exports_base <- file.path(workspace_bucket, "bq_exports", owner_email)
+      cat(sprintf("Searching for drug exports in: %s\n", bq_exports_base))
+
+      # Search for drug_98104042 folder using gsutil
+      search_pattern <- sprintf("%s/*/drug_98104042/drug_98104042_*.csv", bq_exports_base)
+      gsutil_cmd <- sprintf("gsutil ls %s 2>/dev/null | head -100 || true", shQuote(search_pattern))
+      gcs_files <- system(gsutil_cmd, intern = TRUE)
+
+      if (length(gcs_files) > 0 && !any(grepl("^CommandException|^BucketNotFoundException", gcs_files))) {
+        cat(sprintf("✓ Found %d CSV file(s) in GCS\n", length(gcs_files)))
+        cat("  Loading data from GCS...\n")
+
+        # Create temp directory for downloading CSVs
+        temp_dir <- tempdir()
+        local_files <- file.path(temp_dir, basename(gcs_files))
+
+        # Download each file
+        for (i in seq_along(gcs_files)) {
+          cat(sprintf("  Downloading file %d/%d...\n", i, length(gcs_files)))
+          system(sprintf("gsutil -q cp %s %s", shQuote(gcs_files[i]), shQuote(local_files[i])))
+        }
+
+        # Load and combine all CSV files
+        cat("  Reading CSV files...\n")
+        drug_raw <- map_dfr(local_files, read_csv, show_col_types = FALSE)
+
+        # Clean up temp files
+        file.remove(local_files)
+
+        cat(sprintf("✓ Loaded %s drug records from CSV export\n", format(nrow(drug_raw), big.mark = ",")))
+      } else {
         stop(paste(
           "\n❌ ERROR: No drug exposure data found.\n\n",
-          "Option 1: Load data in memory\n",
-          "  Run the system-generated BigQuery code to load drug_df into memory.\n",
-          "  Expected variable names:\n",
+          "Option 1: Load data into memory\n",
+          "  Run system-generated code to load into dataframe:\n",
           "    - dataset_98104042_drug_df\n",
           "    - dataset_23119529_drug_df\n",
           "    - dataset_50785095_drug_exposure_df\n\n",
           "Option 2: Export to CSV\n",
-          "  Use the BigQuery export code that writes to:\n",
-          "    ", file.path(workspace_bucket, "bq_exports", owner_email, "{date}/drug_98104042/"), "\n\n",
+          "  Run the BigQuery EXPORT code (not just the path definition).\n",
+          "  Expected location: ", bq_exports_base, "/YYYYMMDD/drug_98104042/\n\n",
           "Found in memory: ", paste(drug_vars, collapse = ", "), "\n"
         ))
       }
     } else {
       stop(paste(
-        "\n❌ ERROR: No drug exposure data found.\n\n",
-        "Please run the system-generated data export code first.\n",
-        "Expected export location: ", bq_exports_base, "\n\n",
-        "Found in memory: ", paste(drug_vars, collapse = ", "), "\n"
+        "\n❌ ERROR: No pre-loaded drug exposure data found.\n\n",
+        "Please run the system-generated data export code first to load drug_df.\n",
+        "The drug exposure table is too large (~9 million rows) to download directly.\n\n",
+        "Expected variable names:\n",
+        "  - dataset_98104042_drug_df\n",
+          "  - dataset_23119529_drug_df\n",
+        "  - dataset_50785095_drug_exposure_df\n\n",
+        "Found in memory: ", paste(drug_vars, collapse = ", "), "\n\n",
+        "If you have drug data with a different name, please rename it to one of the above.\n"
       ))
     }
-  } else {
-    stop(paste(
-      "\n❌ ERROR: No pre-loaded drug exposure data found.\n\n",
-      "Please run the system-generated data export code first to load drug_df.\n",
-      "The drug exposure table is too large (~9 million rows) to download directly.\n\n",
-      "Expected variable names:\n",
-      "  - dataset_98104042_drug_df\n",
-      "  - dataset_23119529_drug_df\n",
-      "  - dataset_50785095_drug_exposure_df\n\n",
-      "Found in memory: ", paste(drug_vars, collapse = ", "), "\n\n",
-      "If you have drug data with a different name, please rename it to one of the above.\n"
-    ))
   }
 }
 
