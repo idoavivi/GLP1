@@ -36,21 +36,31 @@ bmi_colors <- c(
   "≥40"     = "#DD0000"   # Red (obesity class III)
 )
 
+# Calculate max density for y-axis limit
+max_density <- analysis1_data %>%
+  group_by(bmi_class) %>%
+  summarize(
+    max_d = max(density(avg_steps)$y, na.rm = TRUE),
+    .groups = "drop"
+  ) %>%
+  pull(max_d) %>%
+  max()
+
 # Stagger median label positions to avoid overlap
 # Order medians from left to right and assign different y positions
 class_stats <- class_stats %>%
   arrange(median_steps) %>%
   mutate(
-    label_y_pct = c(115, 112, 109, 106, 103)  # Staggered at top (just above 100%)
+    # Position labels at top, staggered slightly
+    label_y = max_density * c(1.15, 1.12, 1.09, 1.06, 1.03)
   ) %>%
   arrange(bmi_class)  # Back to factor order
 
 # Create publication-ready density plot
 p <- ggplot(analysis1_data, aes(x = avg_steps, fill = bmi_class, color = bmi_class)) +
 
-  # Density curves - scaled to 100% within each BMI class for visibility
-  geom_density(aes(y = after_stat(scaled) * 100),
-               alpha = 0.4, linewidth = 1.2) +
+  # Density curves - actual frequency (not scaled)
+  geom_density(alpha = 0.4, linewidth = 1.2) +
 
   # THICK median lines - very visible
   geom_vline(data = class_stats,
@@ -60,7 +70,7 @@ p <- ggplot(analysis1_data, aes(x = avg_steps, fill = bmi_class, color = bmi_cla
 
   # Median labels - staggered to avoid overlap, black bold text
   geom_label(data = class_stats,
-             aes(x = median_steps, y = label_y_pct,
+             aes(x = median_steps, y = label_y,
                  label = format(round(median_steps), big.mark = ",")),
              color = "black", size = 4, fontface = "bold",
              fill = "white", label.size = 0.3, label.padding = unit(0.2, "lines"),
@@ -82,11 +92,10 @@ p <- ggplot(analysis1_data, aes(x = avg_steps, fill = bmi_class, color = bmi_cla
     expand = c(0, 0)
   ) +
 
-  # Y-axis - scaled 0-100% per BMI class, extended to 120% for labels
+  # Y-axis - actual density (frequency), extended for labels
   scale_y_continuous(
-    labels = function(x) paste0(x, "%"),
-    limits = c(0, 120),
-    breaks = seq(0, 100, 20),
+    labels = scales::comma,
+    limits = c(0, max_density * 1.2),
     expand = c(0, 0)
   ) +
 
@@ -95,7 +104,7 @@ p <- ggplot(analysis1_data, aes(x = avg_steps, fill = bmi_class, color = bmi_cla
     title = "Distribution of Daily Steps by BMI Class",
     subtitle = "Dashed lines show median steps per class (values labeled above). BMI < 18.5 excluded.",
     x = "Average Daily Steps",
-    y = "Participants (%, scaled within BMI class)"
+    y = "Frequency (density)"
   ) +
 
   # Theme - publication ready
