@@ -41,15 +41,15 @@ bmi_colors <- c(
 class_stats <- class_stats %>%
   arrange(median_steps) %>%
   mutate(
-    label_y_pct = c(18, 16, 14, 12, 10)  # Staggered heights as percentages
+    label_y_pct = c(115, 112, 109, 106, 103)  # Staggered at top (just above 100%)
   ) %>%
   arrange(bmi_class)  # Back to factor order
 
 # Create publication-ready density plot
 p <- ggplot(analysis1_data, aes(x = avg_steps, fill = bmi_class, color = bmi_class)) +
 
-  # Density curves as percentages (density * 100 for interpretability)
-  geom_density(aes(y = after_stat(density) * 100),
+  # Density curves - scaled to 100% within each BMI class for visibility
+  geom_density(aes(y = after_stat(scaled) * 100),
                alpha = 0.4, linewidth = 1.2) +
 
   # THICK median lines - very visible
@@ -82,11 +82,11 @@ p <- ggplot(analysis1_data, aes(x = avg_steps, fill = bmi_class, color = bmi_cla
     expand = c(0, 0)
   ) +
 
-  # Y-axis as percentage (density * 100, more realistic range)
+  # Y-axis - scaled 0-100% per BMI class, extended to 120% for labels
   scale_y_continuous(
     labels = function(x) paste0(x, "%"),
-    limits = c(0, 20),
-    breaks = seq(0, 20, 5),
+    limits = c(0, 120),
+    breaks = seq(0, 100, 20),
     expand = c(0, 0)
   ) +
 
