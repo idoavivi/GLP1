@@ -1,9 +1,12 @@
 # =============================================================================
 # BMI TRANSITIONS WITH MEDICATION EXCLUSION (OPTIMIZED)
 # =============================================================================
-# Analyzes participants who transitioned to lower BMI class
-# Excludes those on injectable GLP-1 medications (semaglutide, tirzepatide)
-# Compares activity in 90-day periods BEFORE baseline and nadir weights
+# Analyzes participants who lost weight and transitioned to lower BMI class
+# - Compares HIGHEST weight (baseline) to LOWEST weight (nadir)
+# - Requires ≥30 days between measurements
+# - Excludes weight loss >30% (extreme/unrealistic loss)
+# - Excludes GLP-1 medications (semaglutide, tirzepatide)
+# - Compares activity in 90-day windows BEFORE each measurement (≥5 days required)
 # =============================================================================
 
 library(tidyverse)
@@ -248,33 +251,45 @@ bmi_with_class <- bmi_final_no_glp1 %>%
     )
   )
 
-cat("Finding baseline and nadir weights...\n")
+cat("Finding baseline (highest weight) and nadir (lowest weight)...\n")
 
-# Find baseline (earliest) and nadir (lowest) for each participant
+# Find baseline (HIGHEST weight) and nadir (lowest weight) for each participant
 bmi_transitions <- bmi_with_class %>%
   group_by(person_id) %>%
   arrange(measurement_date) %>%
   summarize(
-    # Baseline (earliest measurement)
-    baseline_date = first(measurement_date),
-    baseline_bmi = first(bmi),
-    baseline_weight = first(weight_kg),
-    baseline_class = first(bmi_class),
-    baseline_class_num = first(bmi_class_num),
+    # Baseline (HIGHEST weight)
+    baseline_date = measurement_date[which.max(weight_kg)],
+    baseline_bmi = bmi[which.max(weight_kg)],
+    baseline_weight = max(weight_kg),
+    baseline_class = bmi_class[which.max(weight_kg)],
+    baseline_class_num = bmi_class_num[which.max(weight_kg)],
 
-    # Nadir (lowest BMI achieved)
-    nadir_date = measurement_date[which.min(bmi)],
+    # Nadir (LOWEST weight)
+    nadir_date = measurement_date[which.min(weight_kg)],
     nadir_bmi = min(bmi),
-    nadir_weight = weight_kg[which.min(bmi)],
-    nadir_class = bmi_class[which.min(bmi)],
-    nadir_class_num = bmi_class_num[which.min(bmi)],
+    nadir_weight = min(weight_kg),
+    nadir_class = bmi_class[which.min(weight_kg)],
+    nadir_class_num = bmi_class_num[which.min(weight_kg)],
 
     .groups = "drop"
   ) %>%
   mutate(
-    days_to_nadir = as.numeric(difftime(nadir_date, baseline_date, units = "days")),
+    # Time between highest and lowest weight
+    days_baseline_to_nadir = as.numeric(difftime(nadir_date, baseline_date, units = "days")),
+
+    # Weight change calculations
+    delta_weight = nadir_weight - baseline_weight,
+    pct_weight_loss = 100 * (baseline_weight - nadir_weight) / baseline_weight,
+
+    # Class change
     class_change = nadir_class_num - baseline_class_num,
-    moved_to_lower_class = class_change < 0 & days_to_nadir > 30
+
+    # Criteria for inclusion
+    moved_to_lower_class = class_change < 0 &  # Moved to lower BMI class
+                          days_baseline_to_nadir >= 30 &  # Nadir at least 30 days AFTER baseline
+                          pct_weight_loss > 0 &  # Actually lost weight (highest before lowest)
+                          pct_weight_loss <= 30  # Exclude extreme weight loss (>30%)
   )
 
 # Filter for participants who moved to lower BMI class
@@ -283,7 +298,7 @@ transitioners <- bmi_transitions %>%
 
 cat(sprintf("Found %s participants who transitioned to lower BMI class\n",
             format(nrow(transitioners), big.mark = ",")))
-cat(sprintf("  (nadir >30 days after baseline, without GLP-1 medications)\n\n"))
+cat(sprintf("  Criteria: highest→lowest weight ≥30 days apart, lost weight but ≤30%%, no GLP-1\n\n"))
 
 if (nrow(transitioners) == 0) {
   cat("⚠ No participants found with BMI class transitions. Analysis complete.\n\n")
@@ -365,16 +380,15 @@ transitioner_summary <- transitioners %>%
     !is.na(n_nadir_days), n_nadir_days >= 5
   ) %>%
   mutate(
-    # Calculate changes
+    # Calculate step changes
     delta_steps = avg_steps_nadir - avg_steps_baseline,
-    pct_change_steps = 100 * delta_steps / avg_steps_baseline,
-    delta_weight = nadir_weight - baseline_weight,
-    pct_weight_loss = 100 * (baseline_weight - nadir_weight) / baseline_weight
+    pct_change_steps = 100 * delta_steps / avg_steps_baseline
+    # Note: delta_weight and pct_weight_loss already calculated in bmi_transitions
   ) %>%
   select(person_id,
          baseline_date, baseline_bmi, baseline_weight, baseline_class,
          nadir_date, nadir_bmi, nadir_weight, nadir_class,
-         days_to_nadir, delta_weight, pct_weight_loss,
+         days_baseline_to_nadir, delta_weight, pct_weight_loss,
          n_baseline_days, n_nadir_days,
          avg_steps_baseline, avg_steps_nadir, delta_steps, pct_change_steps,
          avg_sedentary_baseline, avg_sedentary_nadir,
