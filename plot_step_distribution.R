@@ -36,11 +36,11 @@ bmi_colors <- c(
   "≥40"     = "#DD0000"   # Red (obesity class III)
 )
 
-# Calculate max density for y-axis limit
-max_density <- analysis1_data %>%
+# Calculate max density (as percentage) for y-axis limit
+max_density_pct <- analysis1_data %>%
   group_by(bmi_class) %>%
   summarize(
-    max_d = max(density(avg_steps)$y, na.rm = TRUE),
+    max_d = max(density(avg_steps)$y, na.rm = TRUE) * 100,
     .groups = "drop"
   ) %>%
   pull(max_d) %>%
@@ -52,15 +52,17 @@ class_stats <- class_stats %>%
   arrange(median_steps) %>%
   mutate(
     # Position labels at top, staggered slightly
-    label_y = max_density * c(1.15, 1.12, 1.09, 1.06, 1.03)
+    label_y = max_density_pct * c(1.15, 1.12, 1.09, 1.06, 1.03)
   ) %>%
   arrange(bmi_class)  # Back to factor order
 
 # Create publication-ready density plot
 p <- ggplot(analysis1_data, aes(x = avg_steps, fill = bmi_class, color = bmi_class)) +
 
-  # Density curves - actual frequency (not scaled)
-  geom_density(alpha = 0.4, linewidth = 1.2) +
+  # Density curves - as percentages (density * 100, area under curve = 100%)
+  # NOT scaled to peak at 100%
+  geom_density(aes(y = after_stat(density) * 100),
+               alpha = 0.4, linewidth = 1.2) +
 
   # THICK median lines - very visible
   geom_vline(data = class_stats,
@@ -92,10 +94,10 @@ p <- ggplot(analysis1_data, aes(x = avg_steps, fill = bmi_class, color = bmi_cla
     expand = c(0, 0)
   ) +
 
-  # Y-axis - actual density (frequency), extended for labels
+  # Y-axis - density as percentage (area under curve = 100%, but peak ≠ 100%)
   scale_y_continuous(
-    labels = scales::comma,
-    limits = c(0, max_density * 1.2),
+    labels = function(x) paste0(x, "%"),
+    limits = c(0, max_density_pct * 1.2),
     expand = c(0, 0)
   ) +
 
@@ -104,7 +106,7 @@ p <- ggplot(analysis1_data, aes(x = avg_steps, fill = bmi_class, color = bmi_cla
     title = "Distribution of Daily Steps by BMI Class",
     subtitle = "Dashed lines show median steps per class (values labeled above). BMI < 18.5 excluded.",
     x = "Average Daily Steps",
-    y = "Frequency (density)"
+    y = "Participants (%)"
   ) +
 
   # Theme - publication ready
